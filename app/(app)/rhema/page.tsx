@@ -40,6 +40,9 @@ type Word = [string, number, string]; // [surface, strongs, morph]
 type TextMode = "majority" | "critical";
 type ActiveTab = "parsing" | "definition" | "occurrences";
 
+const STORAGE_BASE =
+  "https://firebasestorage.googleapis.com/v0/b/disciple-preparer.firebasestorage.app/o/rhema%2F";
+
 const DATA_FILES = [
   "rhema-nt.js", "rhema-critical.js", "rhema-lxx.js",
   "rhema-lexicon.js", "rhema-mm.js", "rhema-msb.js",
@@ -151,7 +154,7 @@ export default function RhemaPage() {
     let failed = false;
     for (const file of DATA_FILES) {
       const s = document.createElement("script");
-      s.src = `/rhema/${file}`;
+      s.src = `${STORAGE_BASE}${encodeURIComponent(file)}?alt=media`;
       s.onload = () => {
         loaded++;
         if (loaded === DATA_FILES.length) {
