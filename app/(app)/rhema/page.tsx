@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { ChevronLeft, ChevronRight, X, ChevronDown, ArrowLeft, Copy, FileText, Link2, Save, Check, BookOpen } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
@@ -134,32 +134,93 @@ function getQuickDef(lex: LexEntry): string {
   return ans.length > 150 ? ans.slice(0, 147) + "..." : ans;
 }
 
-/* Returns a gloss that reflects the inflected form for verbs (adds person/number subject) */
-function getInflectedGloss(lex: LexEntry, morph: string): string {
-  const raw = lex.quick_def || lex.brief || "";
-  const plain = raw.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-  const base = plain.split(/[,;]/)[0].trim().slice(0, 45);
+/* ── English verb form helpers (ported from Greek-Vocab source) ── */
+function engIng(v: string): string {
+  if (!v) return v;
+  if (/[^aeiou]e$/.test(v)) return v.slice(0, -1) + "ing";
+  return v + "ing";
+}
+function engPast(v: string): string {
+  if (!v) return v;
+  if (/e$/.test(v)) return v + "d";
+  if (/[^aeiou]y$/.test(v)) return v.slice(0, -1) + "ied";
+  return v + "ed";
+}
+function eng3sg(v: string): string {
+  if (!v) return v;
+  if (/(?:s|sh|ch|x|z)$/.test(v)) return v + "es";
+  if (/[^aeiou]y$/.test(v)) return v.slice(0, -1) + "ies";
+  return v + "s";
+}
+
+/* Inflected gloss for verbs: "he / she loves", "to love", "loving", "having loved", "love!" */
+function verbGloss(morph: string, brief: string): string {
+  const base = brief.split(",")[0].split(";")[0].trim().replace(/^I /, "").trim();
   if (!base) return "";
-
-  const segs = morph.split("-");
-  if (segs[0] !== "V") return base;
-
-  const tvm = segs[1] || "";
-  const pn  = segs[2] || "";
-  const mood = tvm[2];
-
-  // Infinitives and participles keep the base form
-  if (mood === "N" || mood === "P" || !pn) return base;
-
-  const SUBJECT: Record<string, string> = {
-    "1S": "I", "2S": "you", "3S": "he/she",
-    "1P": "we", "2P": "you all", "3P": "they",
+  if (!morph || !morph.startsWith("V-")) return base;
+  const parts = morph.split("-");
+  const form = (parts[1] || "").replace(/^2/, "");
+  const persNum = parts[2] || "";
+  const tense = form[0], voice = form[1], mood = form[form.length - 1];
+  if (mood === "N") return `to ${base}`;
+  if (mood === "P")
+    return tense === "A" || tense === "X" || tense === "Y"
+      ? `having ${engPast(base)}`
+      : engIng(base);
+  const pn = persNum.match(/^([123])([SP])/);
+  if (!pn) return base;
+  const [, pers, num] = pn;
+  const SUBJ: Record<string, string> = {
+    "1S": "I", "2S": "you", "3S": "he / she", "1P": "we", "2P": "you all", "3P": "they",
   };
-  const subject = SUBJECT[`${pn[0]}${pn[1]}`];
-  if (!subject) return base;
+  const subj = SUBJ[`${pers}${num}`] || "";
+  const modal = mood === "S" || mood === "O" ? " might" : "";
+  if (mood === "M") return `${base}!`;
+  if (base === "am" || base === "be") {
+    const BE: Record<string, string> = { "1S": "am", "2S": "are", "3S": "is", "1P": "are", "2P": "are", "3P": "are" };
+    const beF = BE[`${pers}${num}`] || "are";
+    return modal ? `${subj} might ${beF}` : `${subj} ${beF}`;
+  }
+  const conjugated = voice === "P"
+    ? `be ${base}`
+    : pers === "3" && num === "S" && !modal
+      ? eng3sg(base.split(" ")[0]) + (base.includes(" ") ? base.slice(base.indexOf(" ")) : "")
+      : base;
+  return subj ? `${subj}${modal} ${conjugated}` : `${modal.trim()} ${conjugated}`.trim();
+}
 
-  const stem = base.replace(/^to\s+/i, "").trim();
-  return `${subject} ${stem}`;
+/* Case-inflected gloss for nouns/pronouns/adjectives: "of God", "to/for God" */
+function nounGloss(morph: string, brief: string): string {
+  const base = brief.split(",")[0].split(";")[0].trim();
+  if (!base || !morph) return base;
+  const segs = morph.split("-");
+  const posRaw = segs[0];
+  if (posRaw === "T") return base;
+  const cng = segs[1] || "";
+  if (!cng) return base;
+  if (["PRI", "NUI", "LI", "OI"].includes(cng)) return base;
+  let caseCode: string;
+  if (posRaw === "P") {
+    caseCode = cng[0] === "1" || cng[0] === "2" ? cng[1] : cng[0];
+  } else if (posRaw === "F") {
+    caseCode = cng[1];
+  } else if (posRaw === "S") {
+    caseCode = cng[2];
+  } else {
+    caseCode = cng[0];
+  }
+  const CASE_PREP: Record<string, string> = { N: "", G: "of ", D: "to/for ", A: "", V: "O " };
+  const prep = CASE_PREP[caseCode];
+  if (prep === undefined) return base;
+  return prep ? `${prep}${base}` : base;
+}
+
+/* Unified word gloss: routes to verb or noun function based on morph code */
+function getWordGloss(lex: LexEntry, morph: string): string {
+  const brief = (lex.brief || lex.quick_def || "").replace(/<[^>]+>/g, "").trim();
+  if (!brief) return "";
+  if (morph.startsWith("V-")) return verbGloss(morph, brief);
+  return nounGloss(morph, brief);
 }
 
 function getOccurrences(strongs: number, mode: TextMode): { total: number; books: Record<string, number> } {
@@ -240,6 +301,7 @@ export default function RhemaPage() {
   const [bookSearch, setBookSearch] = useState("");
   const [, forceUpdate] = useState(0);
   const loadingRef = useRef(false);
+  const verseDisplayRef = useRef<HTMLDivElement>(null);
 
   // Navigation history (persisted in localStorage)
   const [navHistory, setNavHistory] = useState<Array<{ book: string; chapter: string; verse: string }>>([]);
@@ -272,8 +334,19 @@ export default function RhemaPage() {
       if (h) setNavHistory(JSON.parse(h));
       const hl = localStorage.getItem("rhema-highlights");
       if (hl) setIntendedHighlights(new Set(JSON.parse(hl)));
+      const pos = localStorage.getItem("rhema-position");
+      if (pos) {
+        const { book: b, chapter: c, verse: v } = JSON.parse(pos);
+        if (b && c && v) { setBook(b); setChapter(c); setVerse(v); }
+      }
     } catch { /* ignore */ }
   }, []);
+
+  /* Save current position */
+  useEffect(() => {
+    if (!loaded) return;
+    localStorage.setItem("rhema-position", JSON.stringify({ book, chapter, verse }));
+  }, [loaded, book, chapter, verse]);
 
   /* Persist nav history */
   useEffect(() => {
@@ -376,6 +449,22 @@ export default function RhemaPage() {
     }
   }, [book, chapter, verse, textMode]);
 
+  /* Touch swipe to navigate verses */
+  useEffect(() => {
+    const el = verseDisplayRef.current;
+    if (!el || !loaded) return;
+    let startX = 0, startY = 0;
+    const onStart = (e: TouchEvent) => { startX = e.touches[0].clientX; startY = e.touches[0].clientY; };
+    const onEnd = (e: TouchEvent) => {
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = e.changedTouches[0].clientY - startY;
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) navigateVerse(dx > 0 ? -1 : 1);
+    };
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchend", onEnd, { passive: true });
+    return () => { el.removeEventListener("touchstart", onStart); el.removeEventListener("touchend", onEnd); };
+  }, [loaded, navigateVerse]);
+
   function selectBook(code: string) {
     const chs = getChapters(code, textMode);
     const firstCh = chs[0] || "1";
@@ -406,6 +495,13 @@ export default function RhemaPage() {
     const last = navHistory[navHistory.length - 1];
     setNavHistory(h => h.slice(0, -1));
     setBook(last.book); setChapter(last.chapter); setVerse(last.verse);
+    setActiveWord(null);
+  }
+
+  function jumpToHistoryStop(idx: number) {
+    const stop = navHistory[idx];
+    setNavHistory(h => h.slice(0, idx));
+    setBook(stop.book); setChapter(stop.chapter); setVerse(stop.verse);
     setActiveWord(null);
   }
 
@@ -626,26 +722,31 @@ export default function RhemaPage() {
 
       {/* ── Breadcrumb trail ── */}
       {navHistory.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border-subtle/50 bg-bg-surface/50 shrink-0">
-          <button onClick={handleBack}
-            className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors font-medium">
-            <ArrowLeft className="h-3 w-3" />
-            Back to {BOOK_NAMES[navHistory[navHistory.length - 1].book] || navHistory[navHistory.length - 1].book}{" "}
-            {navHistory[navHistory.length - 1].chapter}:{navHistory[navHistory.length - 1].verse}
-          </button>
-          {navHistory.length > 1 && (
-            <span className="text-xs text-text-muted opacity-50">+{navHistory.length - 1} more</span>
-          )}
+        <div className="flex items-center px-4 py-1.5 border-b border-border-subtle/50 bg-bg-surface/50 shrink-0 overflow-x-auto gap-0 min-w-0">
+          {navHistory.map((stop, idx) => (
+            <span key={idx} className="flex items-center shrink-0">
+              <button
+                onClick={() => jumpToHistoryStop(idx)}
+                className="text-xs text-accent hover:text-accent-hover whitespace-nowrap px-1.5 py-1 hover:bg-bg-elevated transition-colors rounded-sm"
+              >
+                {BOOK_NAMES[stop.book] || stop.book} {stop.chapter}:{stop.verse}
+              </button>
+              <ChevronRight className="h-3 w-3 text-text-muted opacity-30 shrink-0" />
+            </span>
+          ))}
+          <span className="text-xs text-text-primary font-medium whitespace-nowrap px-1.5 py-1 shrink-0">
+            {bookName} {chapter}:{verse}
+          </span>
           <button onClick={() => setNavHistory([])}
-            className="ml-auto text-xs text-text-muted hover:text-text-primary transition-colors opacity-60 hover:opacity-100">
-            Clear
+            className="ml-3 text-xs text-text-muted hover:text-danger transition-colors opacity-50 hover:opacity-100 shrink-0">
+            ✕
           </button>
         </div>
       )}
 
       {/* ── Body ── */}
       <div className="flex flex-1 min-h-0">
-        <div className="flex-1 overflow-y-auto p-6 min-w-0">
+        <div ref={verseDisplayRef} className="flex-1 overflow-y-auto p-6 min-w-0">
           {fullChapter ? (
             <ChapterView
               book={book} chapter={chapter} verse={verse}
@@ -908,7 +1009,7 @@ function WordChip({
 }) {
   const [surface, strongs, morph] = word;
   const lex = getLex(strongs);
-  const gloss = getInflectedGloss(lex, morph);
+  const gloss = getWordGloss(lex, morph);
 
   return (
     <button
