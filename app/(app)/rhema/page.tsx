@@ -269,21 +269,87 @@ function parseCrossRefKey(ref: string): { book: string; ch: string; v: string } 
   return { book, ch, v };
 }
 
+/* Strip Greek diacritics/accents for accent-insensitive matching */
+function stripGreekAccents(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").normalize("NFC").toLowerCase();
+}
+
+/* Lexicon search: prefix-first for Greek, English definition fallback */
 function searchLexicon(query: string): Array<{ strongs: number; lex: LexEntry }> {
   if (!query.trim() || !window.RhemaLexicon) return [];
-  const q = query.toLowerCase();
-  const results: Array<{ strongs: number; lex: LexEntry }> = [];
+  const isGreek = /[Ͱ-Ͽἀ-῿Ͱ-Ͽ]/.test(query);
+  const qn = isGreek ? stripGreekAccents(query) : query.toLowerCase();
+  const prefix: Array<{ strongs: number; lex: LexEntry }> = [];
+  const contains: Array<{ strongs: number; lex: LexEntry }> = [];
+  const defMatch: Array<{ strongs: number; lex: LexEntry }> = [];
   for (const [key, lex] of Object.entries(window.RhemaLexicon)) {
-    if (results.length >= 25) break;
-    const lemma  = (lex.lemma  || "").toLowerCase();
-    const trans  = (lex.translit || "").toLowerCase();
-    const brief  = (lex.brief  || "").replace(/<[^>]+>/g, "").toLowerCase();
-    const qd     = (lex.quick_def || "").replace(/<[^>]+>/g, "").toLowerCase();
-    if (lemma.includes(q) || trans.includes(q) || brief.includes(q) || qd.includes(q)) {
-      results.push({ strongs: Number(key), lex });
+    const entry = { strongs: Number(key), lex };
+    if (isGreek) {
+      const lemmaStripped = stripGreekAccents(lex.lemma || "");
+      if (lemmaStripped.startsWith(qn)) { prefix.push(entry); continue; }
+      if (lemmaStripped.includes(qn)) { contains.push(entry); continue; }
+    } else {
+      const trans = (lex.translit || "").toLowerCase();
+      const brief = (lex.brief || "").replace(/<[^>]+>/g, "").toLowerCase();
+      const qd    = (lex.quick_def || "").replace(/<[^>]+>/g, "").toLowerCase();
+      if (trans.startsWith(qn)) { prefix.push(entry); continue; }
+      if (trans.includes(qn))   { contains.push(entry); continue; }
+      if (query.length >= 3 && (brief.includes(qn) || qd.includes(qn))) defMatch.push(entry);
     }
   }
-  return results;
+  return [...prefix, ...contains, ...defMatch].slice(0, 30);
+}
+
+/* Scan NT text for exact surface-form matches, keyed by surface+morph to keep
+   distinct inflections separate (prevents dative/nominative from merging) */
+function scanNTForms(query: string): Array<{ surface: string; morph: string; strongs: number; count: number; exact: boolean }> {
+  if (!/[Ͱ-Ͽἀ-῿Ͱ-Ͽ]/.test(query)) return [];
+  const text = getText("majority");
+  if (!text) return [];
+  const qn = stripGreekAccents(query);
+  const found: Record<string, { surface: string; morph: string; strongs: number; count: number; exact: boolean }> = {};
+  for (const book of NT_BOOK_ORDER) {
+    const bdata = text[book] || {};
+    for (const ch of Object.keys(bdata)) {
+      for (const v of Object.keys(bdata[ch])) {
+        for (const word of (bdata[ch][v] || [])) {
+          const sn = stripGreekAccents(word[0]);
+          const isExact = sn === qn;
+          const isPrefix = !isExact && sn.startsWith(qn);
+          if (!isExact && !isPrefix) continue;
+          const key = word[0] + "|" + word[2];
+          if (!found[key]) found[key] = { surface: word[0], morph: word[2], strongs: word[1], count: 0, exact: isExact };
+          found[key].count++;
+        }
+      }
+    }
+  }
+  return Object.values(found)
+    .sort((a, b) => (b.exact ? 1000 : 0) + b.count - (a.exact ? 1000 : 0) - a.count)
+    .slice(0, 20);
+}
+
+/* Human-readable label for an inflected form from morph code */
+function getMorphFormLabel(morph: string): string {
+  if (!morph) return "";
+  const rows = decodeMorph(morph);
+  const caseRow = rows.find(r => r.label === "Case");
+  if (caseRow?.value) {
+    const numRow = rows.find(r => r.label === "Number");
+    const genRow = rows.find(r => r.label === "Gender");
+    return [caseRow.value, numRow?.value, genRow?.value].filter(Boolean).join(" ");
+  }
+  const moodRow = rows.find(r => r.label === "Mood");
+  if (moodRow?.value) {
+    const tensRow = rows.find(r => r.label === "Tense");
+    const persRow = rows.find(r => r.label === "Person");
+    const numRow  = rows.find(r => r.label === "Number");
+    return [tensRow?.value, moodRow.value, persRow?.value, numRow?.value].filter(Boolean).join(" ");
+  }
+  const formRow = rows.find(r => r.label === "Form");
+  if (formRow?.value) return formRow.value;
+  const posRow = rows.find(r => r.label === "Part of Speech");
+  return posRow?.value || "";
 }
 
 /* ── Syntax tree: constants ─────────────────────────────────── */
@@ -700,9 +766,12 @@ export default function RhemaPage() {
   const [showHighlighter, setShowHighlighter] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
 
-  // Study notes
+  // Study workspace
   const [observations, setObservations] = useState("");
   const [interpretations, setInterpretations] = useState("");
+  const [applications, setApplications] = useState("");
+  const [questions, setQuestions] = useState("");
+  const [studyTab, setStudyTab] = useState<"observations" | "interpretations" | "applications" | "questions">("observations");
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
 
@@ -777,9 +846,13 @@ export default function RhemaPage() {
           const data = snap.data();
           setObservations(data.observations || "");
           setInterpretations(data.interpretations || "");
+          setApplications(data.applications || "");
+          setQuestions(data.questions || "");
         } else {
           setObservations("");
           setInterpretations("");
+          setApplications("");
+          setQuestions("");
         }
       } catch { /* ignore */ }
     })();
@@ -896,7 +969,7 @@ export default function RhemaPage() {
     setNoteSaving(true);
     try {
       const ref = doc(db, "rhema_notes", user.uid, "passages", `${book}_${chapter}_${verse}`);
-      await setDoc(ref, { observations, interpretations, updatedAt: new Date() });
+      await setDoc(ref, { observations, interpretations, applications, questions, updatedAt: new Date() });
       setNoteSaved(true);
       setTimeout(() => setNoteSaved(false), 2000);
     } catch { /* ignore */ }
@@ -957,10 +1030,7 @@ export default function RhemaPage() {
     }
   }
 
-  const libraryResults = useMemo(
-    () => (loaded ? searchLexicon(libraryQuery) : []),
-    [libraryQuery, loaded]
-  );
+  /* libraryResults computed inside WordLibraryPanel to avoid scanning NT on every render */
 
   const filteredBooks = allBooks.filter(c =>
     (BOOK_NAMES[c] || c).toLowerCase().includes(bookSearch.toLowerCase())
@@ -1203,20 +1273,28 @@ export default function RhemaPage() {
           <WordLibraryPanel
             query={libraryQuery}
             setQuery={setLibraryQuery}
-            results={libraryResults}
-            onSelect={(strongs, lex) => {
+            loaded={loaded}
+            onSelectLex={(strongs, lex) => {
               setActiveWord([lex.lemma || "", strongs, ""]);
               setActiveTab("definition");
+              setShowLibrary(false);
+            }}
+            onSelectForm={(strongs, surface, morph) => {
+              setActiveWord([surface, strongs, morph]);
+              setActiveTab("parsing");
               setShowLibrary(false);
             }}
             onClose={() => setShowLibrary(false)}
           />
         )}
         {showNotes && (
-          <StudyNotesPanel
+          <StudyWorkspacePanel
             book={book} chapter={chapter} verse={verse}
+            activeTab={studyTab} onTabChange={setStudyTab}
             observations={observations} setObservations={setObservations}
             interpretations={interpretations} setInterpretations={setInterpretations}
+            applications={applications} setApplications={setApplications}
+            questions={questions} setQuestions={setQuestions}
             noteSaving={noteSaving} noteSaved={noteSaved}
             onSave={saveNotes}
             onClose={() => setShowNotes(false)}
@@ -2136,95 +2214,192 @@ function HighlighterBar({ intendedHighlights, activeHighlights, versePosCats, sh
 }
 
 /* ── WordLibraryPanel ───────────────────────────────────────── */
-function WordLibraryPanel({ query, setQuery, results, onSelect, onClose }: {
+const GREEK_KEYS = ["α","β","γ","δ","ε","ζ","η","θ","ι","κ","λ","μ","ν","ξ","ο","π","ρ","σ","τ","υ","φ","χ","ψ","ω"];
+
+function WordLibraryPanel({ query, setQuery, loaded, onSelectLex, onSelectForm, onClose }: {
   query: string;
   setQuery: (q: string) => void;
-  results: Array<{ strongs: number; lex: LexEntry }>;
-  onSelect: (strongs: number, lex: LexEntry) => void;
+  loaded: boolean;
+  onSelectLex: (strongs: number, lex: LexEntry) => void;
+  onSelectForm: (strongs: number, surface: string, morph: string) => void;
   onClose: () => void;
 }) {
+  const [showKeyboard, setShowKeyboard] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const lexResults = useMemo(() => (loaded ? searchLexicon(query) : []), [loaded, query]);
+  const ntForms    = useMemo(() => (loaded ? scanNTForms(query) : []), [loaded, query]);
+
+  function insertChar(ch: string) {
+    setQuery(query + ch);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+  function doBackspace() {
+    setQuery(query.slice(0, -1));
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
   return (
-    <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
       <PanelHeader title="Word Library" onClose={onClose} />
-      <div className="px-4 py-3 border-b border-border-subtle">
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search lemma, transliteration, or meaning…"
-          className="w-full h-8 bg-bg-elevated border border-border-subtle px-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
-          autoFocus
-        />
+      <div className="px-3 py-2.5 border-b border-border-subtle flex flex-col gap-2 shrink-0">
+        <div className="flex items-center gap-1.5">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Greek (ἀγαπ…), translit, or meaning…"
+            className="flex-1 h-8 bg-bg-elevated border border-border-subtle px-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent min-w-0"
+            autoFocus
+          />
+          <button
+            onClick={() => setShowKeyboard(v => !v)}
+            title="Greek keyboard"
+            className={cn("h-8 px-2.5 border text-base font-serif shrink-0 transition-colors",
+              showKeyboard ? "border-accent text-accent bg-accent/10" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}
+          >α</button>
+        </div>
+        {showKeyboard && (
+          <div className="flex flex-wrap gap-0.5">
+            {GREEK_KEYS.map(ch => (
+              <button key={ch} onClick={() => insertChar(ch)}
+                className="w-[26px] h-[26px] flex items-center justify-center border border-border-subtle text-text-primary text-sm font-serif hover:bg-bg-elevated hover:border-accent transition-colors">
+                {ch}
+              </button>
+            ))}
+            <button onClick={doBackspace}
+              className="px-2 h-[26px] flex items-center justify-center border border-border-subtle text-text-muted text-xs hover:bg-bg-elevated hover:border-[#3a4052] transition-colors ml-0.5">
+              ⌫
+            </button>
+          </div>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto">
         {!query.trim() ? (
-          <p className="text-xs text-text-muted opacity-60 p-4">Type to search the Greek lexicon.</p>
-        ) : results.length === 0 ? (
-          <p className="text-xs text-text-muted opacity-60 p-4">No results found.</p>
+          <p className="text-xs text-text-muted opacity-60 p-4 leading-relaxed">Search by Greek (use the α keyboard or type with accents), transliteration, or English meaning.</p>
+        ) : ntForms.length === 0 && lexResults.length === 0 ? (
+          <p className="text-xs text-text-muted opacity-60 p-4">No results for "{query}".</p>
         ) : (
-          <div className="flex flex-col divide-y divide-border-subtle/50">
-            {results.map(({ strongs, lex }) => {
-              const quick = (lex.quick_def || lex.brief || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 60);
-              return (
-                <button
-                  key={strongs}
-                  onClick={() => onSelect(strongs, lex)}
-                  className="w-full text-left px-4 py-3 hover:bg-bg-elevated transition-colors"
-                >
-                  <div className="flex items-baseline gap-2 mb-0.5">
-                    <span className="text-base text-text-primary" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
-                      {lex.lemma || ""}
-                    </span>
-                    {lex.translit && <span className="text-xs text-text-muted italic">{lex.translit}</span>}
-                    <span className="ml-auto text-[10px] text-text-muted opacity-60">G{strongs}</span>
-                  </div>
-                  {quick && <p className="text-xs text-text-muted leading-relaxed truncate">{quick}</p>}
-                </button>
-              );
-            })}
-          </div>
+          <>
+            {ntForms.length > 0 && (
+              <div>
+                <p className="text-[9px] font-bold text-text-muted uppercase tracking-widest px-4 py-1.5 border-b border-border-subtle/60 bg-bg-elevated/60 sticky top-0">Exact Forms in NT</p>
+                {ntForms.map((f, i) => {
+                  const lex = getLex(f.strongs);
+                  const formLabel = getMorphFormLabel(f.morph);
+                  const brief = (lex.brief || "").replace(/<[^>]+>/g, "").split(",")[0].trim();
+                  return (
+                    <button key={i} onClick={() => onSelectForm(f.strongs, f.surface, f.morph)}
+                      className="w-full text-left px-4 py-2.5 hover:bg-bg-elevated border-b border-border-subtle/40 transition-colors">
+                      <div className="flex items-baseline gap-2 mb-0.5">
+                        <span className="text-base text-text-primary" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{f.surface}</span>
+                        {lex.translit && <span className="text-xs text-text-muted italic">{lex.translit}</span>}
+                        <span className="ml-auto text-[10px] text-text-muted/70 shrink-0">{f.count}×</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {formLabel && <span className="text-[10px] text-accent/80 font-semibold shrink-0">{formLabel}</span>}
+                        {brief && <span className="text-[10px] text-text-muted truncate">{brief}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {lexResults.length > 0 && (
+              <div>
+                <p className="text-[9px] font-bold text-text-muted uppercase tracking-widest px-4 py-1.5 border-b border-border-subtle/60 bg-bg-elevated/60 sticky top-0">Lexical Forms</p>
+                {lexResults.map(({ strongs, lex }) => {
+                  const quick = (lex.quick_def || lex.brief || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().split(/[;,]/)[0].trim().slice(0, 55);
+                  return (
+                    <button key={strongs} onClick={() => onSelectLex(strongs, lex)}
+                      className="w-full text-left px-4 py-2.5 hover:bg-bg-elevated border-b border-border-subtle/40 transition-colors">
+                      <div className="flex items-baseline gap-2 mb-0.5">
+                        <span className="text-base text-text-primary" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{lex.lemma || ""}</span>
+                        {lex.translit && <span className="text-xs text-text-muted italic">{lex.translit}</span>}
+                        <span className="ml-auto text-[10px] text-text-muted/70 shrink-0">G{strongs}</span>
+                      </div>
+                      {quick && <p className="text-[10px] text-text-muted truncate">{quick}</p>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 }
 
-/* ── StudyNotesPanel ────────────────────────────────────────── */
-function StudyNotesPanel({
+/* ── StudyWorkspacePanel ────────────────────────────────────── */
+type WorkspaceTab = "observations" | "interpretations" | "applications" | "questions";
+
+const WS_META: Record<WorkspaceTab, { label: string; placeholder: string }> = {
+  observations:    { label: "Observe",   placeholder: "What do you notice? Grammatical, structural, and literary observations…" },
+  interpretations: { label: "Interpret", placeholder: "What does this mean? Theological significance and doctrinal insights…" },
+  applications:    { label: "Apply",     placeholder: "How does this apply to life, ministry, or community?" },
+  questions:       { label: "Questions", placeholder: "What are you wondering? What needs more study?" },
+};
+
+function StudyWorkspacePanel({
   book, chapter, verse,
+  activeTab, onTabChange,
   observations, setObservations,
   interpretations, setInterpretations,
+  applications, setApplications,
+  questions, setQuestions,
   noteSaving, noteSaved, onSave, onClose,
 }: {
   book: string; chapter: string; verse: string;
+  activeTab: WorkspaceTab; onTabChange: (t: WorkspaceTab) => void;
   observations: string; setObservations: (v: string) => void;
   interpretations: string; setInterpretations: (v: string) => void;
+  applications: string; setApplications: (v: string) => void;
+  questions: string; setQuestions: (v: string) => void;
   noteSaving: boolean; noteSaved: boolean;
   onSave: () => void; onClose: () => void;
 }) {
+  const value = activeTab === "observations" ? observations
+    : activeTab === "interpretations" ? interpretations
+    : activeTab === "applications" ? applications
+    : questions;
+  const setValue = activeTab === "observations" ? setObservations
+    : activeTab === "interpretations" ? setInterpretations
+    : activeTab === "applications" ? setApplications
+    : setQuestions;
+  const meta = WS_META[activeTab];
+
   return (
-    <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
-      <PanelHeader title="Study Notes" subtitle={`${BOOK_NAMES[book] || book} ${chapter}:${verse}`} onClose={onClose} />
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest">Observations</p>
-          <textarea value={observations} onChange={e => setObservations(e.target.value)}
-            placeholder="What does the text say? Grammatical, structural, literary observations…"
-            className="w-full min-h-[120px] bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed" />
-        </div>
-        <div className="flex flex-col gap-2">
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest">Interpretations</p>
-          <textarea value={interpretations} onChange={e => setInterpretations(e.target.value)}
-            placeholder="What does the text mean? Theological significance, cross-reference connections…"
-            className="w-full min-h-[120px] bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed" />
-        </div>
+    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+      <PanelHeader title="Study Workspace" subtitle={`${BOOK_NAMES[book] || book} ${chapter}:${verse}`} onClose={onClose} />
+      {/* Tab bar */}
+      <div className="flex border-b border-border-subtle shrink-0">
+        {(Object.entries(WS_META) as [WorkspaceTab, typeof WS_META[WorkspaceTab]][]).map(([tab, m]) => (
+          <button key={tab} onClick={() => onTabChange(tab)}
+            className={cn("flex-1 py-2 text-[9px] font-semibold uppercase tracking-wide transition-colors border-b-2",
+              activeTab === tab
+                ? "text-text-primary border-accent"
+                : "text-text-muted border-transparent hover:text-text-primary")}>
+            {m.label}
+          </button>
+        ))}
       </div>
-      <div className="p-4 border-t border-border-subtle">
+      {/* Text area */}
+      <div className="flex-1 overflow-hidden p-4 flex flex-col">
+        <textarea
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          placeholder={meta.placeholder}
+          className="flex-1 w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
+        />
+      </div>
+      <div className="p-4 border-t border-border-subtle shrink-0">
         <button onClick={onSave} disabled={noteSaving}
           className={cn("w-full h-8 flex items-center justify-center gap-2 text-xs font-medium border transition-colors disabled:opacity-60",
             noteSaved ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
           {noteSaved ? <><Check className="h-3.5 w-3.5" /> Saved</>
             : noteSaving ? <><div className="h-3.5 w-3.5 border border-current border-t-transparent rounded-full animate-spin" /> Saving…</>
-            : <><Save className="h-3.5 w-3.5" /> Save Notes</>}
+            : <><Save className="h-3.5 w-3.5" /> Save</>}
         </button>
       </div>
     </div>
