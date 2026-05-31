@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
@@ -300,6 +300,7 @@ export default function RhemaPage() {
   const [vPickerOpen, setVPickerOpen] = useState(false);
   const [bookSearch, setBookSearch] = useState("");
   const [grammarModal, setGrammarModal] = useState<{ category: string; value: string } | null>(null);
+  const [showWandPopup, setShowWandPopup] = useState(false);
   const [, forceUpdate] = useState(0);
   const loadingRef = useRef(false);
 
@@ -415,6 +416,7 @@ export default function RhemaPage() {
         setShowNotes(false);
         setShowHighlighter(false);
         setShowLibrary(false);
+        setShowWandPopup(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -519,6 +521,7 @@ export default function RhemaPage() {
     setShowNotes(false);
     setShowHighlighter(false);
     setShowLibrary(false);
+    setShowWandPopup(false);
   }
 
   /* ── Computed values ── */
@@ -530,6 +533,7 @@ export default function RhemaPage() {
   const variantSet  = loaded ? getVariantSet(book, chapter, verse, textMode) : new Set<number>();
   const crossRefs   = loaded ? (window.RhemaCrossRefs?.[`${book} ${chapter}:${verse}`] || null) : null;
   const hasCrossRefs = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
+  const hasActiveMode = fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0;
 
   /* POS categories present in the current verse */
   const versePosCats = useMemo(() => {
@@ -664,20 +668,10 @@ export default function RhemaPage() {
             <Link2 className="h-3.5 w-3.5" />
           </ToolBtn>
 
-          {/* Highlighter */}
-          <ToolBtn
-            active={showHighlighter}
-            onClick={() => { setShowHighlighter(v => !v); setShowCrossRefs(false); setShowNotes(false); setShowLibrary(false); setActiveWord(null); }}
-            label="Highlight"
-            dot={intendedHighlights.size > 0 && !showHighlighter}
-          >
-            <span className="text-[10px] font-bold">A</span>
-          </ToolBtn>
-
           {/* Word library */}
           <ToolBtn
             active={showLibrary}
-            onClick={() => { setShowLibrary(v => !v); setShowCrossRefs(false); setShowNotes(false); setShowHighlighter(false); setActiveWord(null); }}
+            onClick={() => { setShowLibrary(v => !v); setShowCrossRefs(false); setShowNotes(false); setActiveWord(null); setShowWandPopup(false); }}
             label="Library"
           >
             <BookOpen className="h-3.5 w-3.5" />
@@ -686,7 +680,7 @@ export default function RhemaPage() {
           {/* Study notes */}
           <ToolBtn
             active={showNotes}
-            onClick={() => { setShowNotes(v => !v); setShowCrossRefs(false); setShowHighlighter(false); setShowLibrary(false); setActiveWord(null); }}
+            onClick={() => { setShowNotes(v => !v); setShowCrossRefs(false); setShowLibrary(false); setActiveWord(null); setShowWandPopup(false); }}
             label="Notes"
           >
             <FileText className="h-3.5 w-3.5" />
@@ -694,20 +688,36 @@ export default function RhemaPage() {
 
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
-          <ToggleBtn active={fullChapter} onClick={() => setFullChapter(v => !v)} label="Chapter" />
-          <ToggleBtn active={greekOnly} onClick={() => setGreekOnly(v => !v)} label="Gk Only" />
-          {!greekOnly && (
-            <ToggleBtn
-              active={showEnglish}
-              onClick={() => setShowEnglish(v => !v)}
-              label={showEnglish ? getEnglishLabel(textMode) : "English"}
-            />
-          )}
-          <ToggleBtn
-            active={textMode === "critical"}
-            onClick={() => setTextMode(m => m === "critical" ? "majority" : "critical")}
-            label={textMode === "critical" ? "Critical" : "Majority"}
-          />
+          {/* Modes wand */}
+          <div className="relative z-[39]">
+            <button
+              onClick={() => setShowWandPopup(v => !v)}
+              title="View modes & highlighting"
+              className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors relative",
+                showWandPopup || hasActiveMode
+                  ? "border-accent text-accent bg-accent/10"
+                  : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+              )}
+            >
+              <Wand2 className="h-3.5 w-3.5" />
+              <span className="text-[10px] hidden sm:inline">Modes</span>
+              {hasActiveMode && !showWandPopup && (
+                <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent" />
+              )}
+            </button>
+            {showWandPopup && (
+              <WandPopup
+                fullChapter={fullChapter} greekOnly={greekOnly} showEnglish={showEnglish}
+                textMode={textMode} showHighlighter={showHighlighter}
+                intendedCount={intendedHighlights.size}
+                onToggleChapter={() => setFullChapter(v => !v)}
+                onToggleGreekOnly={() => setGreekOnly(v => !v)}
+                onToggleEnglish={() => setShowEnglish(v => !v)}
+                onToggleTextMode={() => setTextMode(m => m === "critical" ? "majority" : "critical")}
+                onToggleHighlight={() => { setShowHighlighter(v => !v); setShowWandPopup(false); }}
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -735,6 +745,19 @@ export default function RhemaPage() {
         </div>
       )}
 
+      {/* ── Highlight bar (inline, below breadcrumb) ── */}
+      {showHighlighter && (
+        <HighlighterBar
+          intendedHighlights={intendedHighlights}
+          activeHighlights={activeHighlights}
+          versePosCats={versePosCats}
+          shaking={shaking}
+          onToggle={toggleHighlightCategory}
+          onClearAll={() => setIntendedHighlights(new Set())}
+          onClose={() => setShowHighlighter(false)}
+        />
+      )}
+
       {/* ── Body ── */}
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 overflow-y-auto p-6 min-w-0">
@@ -759,7 +782,7 @@ export default function RhemaPage() {
         </div>
 
         {/* Right panels */}
-        {activeWord && !showCrossRefs && !showNotes && !showHighlighter && !showLibrary && (
+        {activeWord && !showCrossRefs && !showNotes && !showLibrary && (
           <WordDetail
             word={activeWord} activeTab={activeTab} setActiveTab={setActiveTab}
             textMode={textMode} book={book} chapter={chapter} verse={verse}
@@ -774,17 +797,6 @@ export default function RhemaPage() {
             crossRefs={crossRefs}
             onClose={() => setShowCrossRefs(false)}
             onNavigate={(b, ch, v) => { handleNavigateOccurrence(b, ch, v); setShowCrossRefs(false); }}
-          />
-        )}
-        {showHighlighter && (
-          <HighlighterPanel
-            intendedHighlights={intendedHighlights}
-            activeHighlights={activeHighlights}
-            versePosCats={versePosCats}
-            shaking={shaking}
-            onToggle={toggleHighlightCategory}
-            onClearAll={() => setIntendedHighlights(new Set())}
-            onClose={() => setShowHighlighter(false)}
           />
         )}
         {showLibrary && (
@@ -890,6 +902,11 @@ export default function RhemaPage() {
             ))}
           </div>
         </PickerOverlay>
+      )}
+
+      {/* ── Wand popup backdrop ── */}
+      {showWandPopup && (
+        <div className="fixed inset-0 z-[38]" onClick={() => setShowWandPopup(false)} />
       )}
 
       {/* ── Grammar examples modal ── */}
@@ -1429,8 +1446,77 @@ function CrossRefsPanel({ book, chapter, verse, crossRefs, onClose, onNavigate }
   );
 }
 
-/* ── HighlighterPanel ───────────────────────────────────────── */
-function HighlighterPanel({ intendedHighlights, activeHighlights, versePosCats, shaking, onToggle, onClearAll, onClose }: {
+/* ── WandPopup ──────────────────────────────────────────────── */
+function WandPopup({
+  fullChapter, greekOnly, showEnglish, textMode, showHighlighter, intendedCount,
+  onToggleChapter, onToggleGreekOnly, onToggleEnglish, onToggleTextMode, onToggleHighlight,
+}: {
+  fullChapter: boolean; greekOnly: boolean; showEnglish: boolean; textMode: TextMode;
+  showHighlighter: boolean; intendedCount: number;
+  onToggleChapter: () => void; onToggleGreekOnly: () => void;
+  onToggleEnglish: () => void; onToggleTextMode: () => void; onToggleHighlight: () => void;
+}) {
+  return (
+    <div className="absolute right-0 top-full mt-1 w-56 bg-bg-surface border border-border-subtle shadow-2xl z-[39] py-1.5">
+      <WandItem active={greekOnly} label="Greek Only" desc="Hide word glosses beneath text" onClick={onToggleGreekOnly} />
+      <WandItem active={fullChapter} label="Full Chapter" desc="Show all verses at once" onClick={onToggleChapter} />
+      {!greekOnly && (
+        <WandItem
+          active={showEnglish}
+          label={`English (${textMode === "critical" ? "BSB" : "MSB"})`}
+          desc="Show translation below Greek"
+          onClick={onToggleEnglish}
+        />
+      )}
+      <WandItem
+        active={textMode === "critical"}
+        label={textMode === "critical" ? "Critical Text" : "Majority Text"}
+        desc={textMode === "critical" ? "Currently: SBL Critical NT" : "Currently: Byzantine Majority"}
+        onClick={onToggleTextMode}
+      />
+      <div className="my-1 border-t border-border-subtle/60" />
+      <WandItem
+        active={showHighlighter}
+        label="Word Highlighting"
+        desc={intendedCount > 0 ? `${intendedCount} type${intendedCount > 1 ? "s" : ""} active` : "Highlight words by part of speech"}
+        onClick={onToggleHighlight}
+      />
+    </div>
+  );
+}
+
+function WandItem({ active, label, desc, onClick }: {
+  active: boolean; label: string; desc?: string; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full px-3 py-2 flex items-center gap-3 text-left hover:bg-bg-elevated transition-colors",
+        active && "bg-accent/5"
+      )}
+    >
+      <span className={cn(
+        "h-3.5 w-3.5 rounded-full border-2 shrink-0 flex items-center justify-center mt-0.5",
+        active ? "border-accent bg-accent" : "border-[#3a4052]"
+      )}>
+        {active && <span className="h-1 w-1 rounded-full bg-bg-surface" />}
+      </span>
+      <div className="min-w-0">
+        <p className={cn("text-xs font-medium leading-tight", active ? "text-accent" : "text-text-primary")}>{label}</p>
+        {desc && <p className="text-[10px] text-text-muted mt-0.5 leading-tight">{desc}</p>}
+      </div>
+    </button>
+  );
+}
+
+/* ── HighlighterBar ─────────────────────────────────────────── */
+const HL_SHORT: Record<string, string> = {
+  V: "Verbs", N: "Nouns", ADJ: "Adj", T: "Art",
+  PRON: "Pron", PREP: "Prep", CONJ: "Conj", ADV: "Adv", PART: "Part",
+};
+
+function HighlighterBar({ intendedHighlights, activeHighlights, versePosCats, shaking, onToggle, onClearAll, onClose }: {
   intendedHighlights: Set<string>;
   activeHighlights: Set<string>;
   versePosCats: Set<string>;
@@ -1440,50 +1526,50 @@ function HighlighterPanel({ intendedHighlights, activeHighlights, versePosCats, 
   onClose: () => void;
 }) {
   return (
-    <div className="w-[260px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
-      <PanelHeader title="Highlighter" onClose={onClose}>
-        {intendedHighlights.size > 0 && (
-          <button onClick={onClearAll} className="text-xs text-text-muted hover:text-danger transition-colors ml-auto mr-2">Clear all</button>
-        )}
-      </PanelHeader>
-      <div className="flex-1 overflow-y-auto p-4">
-        <p className="text-xs text-text-muted mb-4 leading-relaxed">
-          Select word types to highlight. Faded = not in this verse. Click to toggle; selecting a type not in this verse will shake.
-        </p>
-        <div className="flex flex-col gap-2">
-          {Object.entries(CATEGORY_CONFIG).map(([cat, cfg]) => {
-            const inVerse = versePosCats.has(cat);
-            const isActive = activeHighlights.has(cat);
-            const isIntended = intendedHighlights.has(cat);
-            const isShaking = shaking === cat;
-            return (
-              <button
-                key={cat}
-                onClick={() => onToggle(cat)}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 border text-left transition-colors",
-                  isShaking && "animate-shake",
-                  isActive
-                    ? cn(cfg.border, cfg.bg)
-                    : isIntended
-                    ? "border-border-subtle opacity-40 cursor-pointer"
-                    : inVerse
-                    ? "border-border-subtle hover:border-[#3a4052]"
-                    : "border-border-subtle opacity-30"
-                )}
-              >
-                <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", cfg.dot, !isActive && "opacity-50")} />
-                <span className={cn("text-xs font-medium", isActive ? cfg.text : "text-text-muted")}>
-                  {cfg.label}
-                </span>
-                {!inVerse && (
-                  <span className="ml-auto text-[10px] text-text-muted opacity-60">none here</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-border-subtle bg-bg-elevated/40 shrink-0 overflow-x-auto">
+      <span className="text-[10px] font-semibold text-text-muted uppercase tracking-widest shrink-0 select-none">
+        Highlight
+      </span>
+      <div className="flex items-center gap-1.5 min-w-0">
+        {Object.entries(CATEGORY_CONFIG).map(([cat, cfg]) => {
+          const inVerse = versePosCats.has(cat);
+          const isActive = activeHighlights.has(cat);
+          const isIntended = intendedHighlights.has(cat);
+          const isShaking = shaking === cat;
+          return (
+            <button
+              key={cat}
+              onClick={() => onToggle(cat)}
+              title={inVerse ? cfg.label : `${cfg.label} — none in this verse`}
+              className={cn(
+                "flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium border transition-colors shrink-0 select-none",
+                isShaking && "animate-shake",
+                isActive
+                  ? cn(cfg.border, cfg.bg, cfg.text)
+                  : isIntended
+                  ? cn("border-border-subtle opacity-40", cfg.text)
+                  : inVerse
+                  ? "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+                  : "border-transparent text-text-muted opacity-20 cursor-default"
+              )}
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", cfg.dot, !isActive && "opacity-60")} />
+              {HL_SHORT[cat] ?? cfg.label}
+            </button>
+          );
+        })}
       </div>
+      {intendedHighlights.size > 0 && (
+        <button
+          onClick={onClearAll}
+          className="text-[10px] text-text-muted hover:text-danger transition-colors shrink-0 ml-1 whitespace-nowrap"
+        >
+          Clear
+        </button>
+      )}
+      <button onClick={onClose} className="text-text-muted hover:text-text-primary shrink-0 ml-auto">
+        <X className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }
@@ -1609,17 +1695,6 @@ function PickerOverlay({ children, onClose }: { children: React.ReactNode; onClo
         {children}
       </div>
     </div>
-  );
-}
-
-/* ── ToggleBtn ──────────────────────────────────────────────── */
-function ToggleBtn({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
-  return (
-    <button onClick={onClick}
-      className={cn("h-7 px-3 text-xs font-medium border transition-colors",
-        active ? "border-accent text-accent bg-accent/10" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
-      {label}
-    </button>
   );
 }
 
