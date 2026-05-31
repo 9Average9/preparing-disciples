@@ -25,9 +25,14 @@ declare global {
     RhemaBSBBooks?: string[];
     RhemaCrossRefs?: Record<string, Record<string, string[]>>;
     RhemaCrossRefLabels?: string[];
-    RhemaSyntax?: Record<string, Record<string, Record<string, Array<{ role?: string; head?: number }>>>> ;
+    RhemaSyntax?: Record<string, Record<string, Record<string, Array<[number, number, string]>>>>;
   }
 }
+
+/* ── Syntax types ────────────────────────────────────────────── */
+interface SxCat { i: number; surface: string; strongs: number; morph: string; pos: string; cng: { case: string; number: string; gender: string | null } | null; vtype: 'finite' | 'participle' | 'infinitive' | null }
+interface SxPhrase { type: string; role: string; label: string; plainLabel?: string; color: string; words: number[]; isMainVerb?: boolean; isDep?: boolean; clauseType?: string; fromDataset?: boolean; prepStrongs?: number; prepObjCase?: string | null; artCase?: string }
+interface SxClause { clauseType: string; label: string; conjPhrase: SxPhrase | null; phrases: SxPhrase[]; isSubordinate: boolean; children: SxClause[] }
 
 interface LexEntry {
   lemma?: string;
@@ -281,6 +286,386 @@ function searchLexicon(query: string): Array<{ strongs: number; lex: LexEntry }>
   return results;
 }
 
+/* ── Syntax tree: constants ─────────────────────────────────── */
+const SX_CLAUSE_TYPES: Record<number, string> = {
+  2443:"purpose", 3704:"purpose",
+  3754:"content", 5620:"result",
+  1487:"conditional", 1437:"conditional",
+  3739:"relative", 3748:"relative", 3699:"relative",
+  3752:"temporal", 3753:"temporal", 2193:"temporal", 4250:"temporal",
+  5613:"comparative", 2531:"comparative", 5618:"comparative", 2509:"comparative",
+  1893:"causal", 1894:"causal", 1063:"explanatory",
+  3767:"inferential", 1352:"inferential", 3606:"inferential", 686:"inferential",
+  235:"adversative", 4133:"adversative",
+  2532:"coordinating", 1161:"coordinating", 5037:"coordinating", 3303:"coordinating",
+  2228:"alternative", 1535:"alternative", 3777:"coordinating",
+};
+const SX_CLAUSE_LABELS: Record<string, string> = {
+  purpose:"Purpose", content:"Content Clause", result:"Result",
+  conditional:"Conditional", relative:"Relative Clause", temporal:"Temporal",
+  comparative:"Comparison", causal:"Reason", explanatory:"Reason",
+  inferential:"Conclusion", adversative:"Contrast",
+  coordinating:"Continued", alternative:"Alternative", conjunction:"Clause",
+};
+const SX_CLAUSE_SUBTITLES: Record<string, string> = {
+  coordinating:"continues the thought", adversative:"sets up a contrast",
+  purpose:"in order that…", content:"explains what was said / thought",
+  result:"so that…", conditional:"if…", relative:"which / who…",
+  temporal:"when / while…", comparative:"just as…", causal:"because…",
+  explanatory:"explains the reason", inferential:"therefore…", alternative:"or…",
+};
+const SX_CLAUSE_COLORS: Record<string, string> = {
+  main:"#c9a84c", coordinating:"#6b7280", conjunction:"#6b7280",
+  purpose:"#8b5cf6", content:"#3b82f6", result:"#10b981", conditional:"#f59e0b",
+  relative:"#06b6d4", temporal:"#f97316", comparative:"#84cc16",
+  causal:"#ec4899", explanatory:"#6366f1", inferential:"#14b8a6",
+  adversative:"#ef4444", alternative:"#a78bfa",
+};
+const SX_PREP_LABELS: Record<number, (c: string | null) => string> = {
+  1223: c => c === "G" ? "through / by means of" : "because of",
+  1722: () => "in / within", 1519: () => "into / toward", 4314: () => "toward / to",
+  1537: () => "from / out of", 575: () => "from / away from",
+  5259: c => c === "G" ? "by (agent)" : "under",
+  5228: c => c === "G" ? "on behalf of" : "above / beyond",
+  2596: c => c === "G" ? "against / down from" : "according to",
+  3326: c => c === "G" ? "with / among" : "after",
+  4862: () => "with / together with",
+  1909: c => c === "G" ? "on / over" : c === "D" ? "on / at" : "upon / onto",
+  3844: c => c === "G" ? "from beside" : c === "D" ? "beside / near" : "alongside",
+  4253: () => "before / in front of",
+  4012: c => c === "G" ? "concerning / about" : "around / near",
+};
+const SX_NEG_STRONGS  = new Set([3756, 3361, 3762, 3367, 3765]);
+const SX_DIST_STRONGS = new Set([3112, 1451, 4139]);
+const SX_LOC_STRONGS  = new Set([1563, 847, 1759, 3606, 1566]);
+const SX_TIME_STRONGS = new Set([3568, 5119, 4218, 3753, 1534, 1899]);
+
+/* Chip color classes: subj=blue, verb=orange, obj=red, gen=purple, dat=teal, prep=green, part=yellow, conj=gray, other=slate */
+const SX_CHIP: Record<string, { bg: string; border: string; text: string }> = {
+  subj:  { bg: "bg-blue-500/10",   border: "border-blue-500/40",   text: "text-blue-400" },
+  verb:  { bg: "bg-orange-500/10", border: "border-orange-500/40", text: "text-orange-400" },
+  obj:   { bg: "bg-red-500/10",    border: "border-red-500/40",    text: "text-red-400" },
+  gen:   { bg: "bg-purple-500/10", border: "border-purple-500/40", text: "text-purple-400" },
+  dat:   { bg: "bg-teal-500/10",   border: "border-teal-500/40",   text: "text-teal-400" },
+  prep:  { bg: "bg-green-500/10",  border: "border-green-500/40",  text: "text-green-400" },
+  part:  { bg: "bg-yellow-500/10", border: "border-yellow-500/40", text: "text-yellow-400" },
+  conj:  { bg: "bg-zinc-500/10",   border: "border-zinc-500/40",   text: "text-zinc-400" },
+  other: { bg: "bg-slate-500/10",  border: "border-slate-500/40",  text: "text-slate-400" },
+};
+
+const SX_ROLE_INFO: Record<string, { title: string; body: string; range: string | null; example: string | null; question: string }> = {
+  subject:        { title:"Subject — Who or what is doing it", body:"The nominative case marks the subject. Greek doesn't rely on word order — the case ending shows who acts, so the subject can appear anywhere in the sentence.", range:null, example:"In English, word order tells you who did what. In Greek, the nominative case ending does that job regardless of position.", question:"Who is performing this action? Is there anything significant about who the subject is in this context?" },
+  predicate:      { title:"Verb — The action or state", body:"The finite verb is the engine of the clause. A single Greek verb encodes: what is happening, when/how complete (tense-aspect), who acts or is acted on (voice), the speaker's certainty (mood), and who is doing it (person/number).", range:"Voice: active = subject acts; passive = subject receives; middle = subject acts for own benefit. Mood: indicative = real; subjunctive = potential; imperative = command; optative = wish.", example:"Aorist = a single completed event; present = ongoing action; perfect = past act whose result still stands. Each encodes a different aspect of the action.", question:"What tense, voice, and mood is this verb? What do those layers tell you?" },
+  object:         { title:"Direct Object — What receives the action", body:"The accusative case marks the direct object — what the verb acts on, regardless of word order.", range:"Also expresses extent of time/space, direction, or is required by certain prepositions (εἰς, κατά, διά).", example:"Greek uses case endings to mark the direct object regardless of word position, unlike English which relies on word order.", question:"What is being affected by this action? Does the word choice carry meaning beyond the simple action?" },
+  genitive:       { title:"Genitive — A relationship to another word", body:"The genitive shows how one word relates to another noun. English translates it with 'of' — but that covers many distinct Greek relationships.", range:"Possible: possession, source, description, partition, separation, or verbal (subjective = God acts; objective = action toward God).", example:"English 'of' covers: 'cup of coffee' (contents), 'man of courage' (description), 'king's decision' (possession). Greek genitive works the same way.", question:"What is the nature of this relationship — possession, source, or description? Which fits the context?" },
+  dative:         { title:"Dative — To, for, by, in, or with", body:"The dative is Greek's most versatile case. English splits its meaning across several prepositions.", range:"Indirect object, means/instrument, location/sphere, manner, or the interested party.", example:"English uses different prepositions: 'to her' (recipient), 'with a knife' (instrument), 'in the room' (location). Greek uses one dative case ending.", question:"Which preposition fits best — to, for, by, in, or with? Does trying different prepositions change your understanding?" },
+  accusative:     { title:"Accusative — Extent, direction, or object of preposition", body:"Here the accusative expresses extent of time/space, direction, or is the required object of a preposition.", range:"Common with εἰς, κατά, διά. The preposition determines the exact meaning.", example:"'Three miles' (extent) and 'the store' (direction) are both accusative in Greek when modifying movement.", question:"What is this expressing — direction, extent, purpose, or object of a preposition?" },
+  vocative:       { title:"Direct Address — Speaking to someone", body:"The vocative case addresses someone directly. It steps outside the grammar to speak to a person or entity.", range:null, example:"In 'David, come here!' the name steps outside the sentence grammar. Greek marks this with its own case ending.", question:"Who is being addressed? What does the title used tell you about the speaker's understanding of this person?" },
+  modifier:       { title:"Prepositional Phrase — Location, direction, or relationship", body:"A preposition + object phrase. In Greek, the case of the object changes the meaning of the preposition — sometimes dramatically.", range:"ἐν + dative = in/among; εἰς + accusative = into/toward; ἐκ + genitive = out of; διά + genitive = through; διά + accusative = because of.", example:"Greek often uses the same preposition but different cases for different meanings. The case does the work that different English prepositions do.", question:"What does this phrase say about location, direction, means, or sphere? Does the case shift the meaning?" },
+  attributive:    { title:"Attributive Participle — Describing a person or thing", body:"A participle with an article acts like an adjective — it describes a noun by its characteristic action.", range:"Best translated as a relative clause: ὁ πιστεύων = 'the one who believes.' Present tense = ongoing/habitual; aorist = completed act.", example:"'The running man' and 'the man who runs' say the same thing — the article + description defines a person by what they do.", question:"What characteristic does this attach to the person? Why does the tense choice (ongoing vs. completed) matter?" },
+  circumstantial: { title:"Circumstantial Participle — When, why, or how", body:"A participle without an article frames or qualifies the main verb.", range:"Temporal ('while/after'), causal ('because'), means ('by doing'), conditional ('if'), concessive ('even though').", example:"Greek marks timing with tense: aorist participle = action before main verb; present = simultaneous.", question:"Is this telling you when, why, how, or under what condition? Does the tense affect the timing relationship?" },
+  infinitive:     { title:"Infinitive — A verb acting as a noun", body:"The Greek infinitive is a verbal noun. It carries the verb's action but plays a noun role — subject, object, or complement.", range:"Purpose (τοῦ/εἰς τό), result, content, or complement of main verb.", example:"'To run' can be a subject, object, or purpose in English. Greek infinitives work identically.", question:"What role is this infinitive playing — purpose, result, content, or complement?" },
+  prednom:        { title:"Predicate Nominative — What the subject is", body:"When a linking verb connects two nominatives, the second one completes or defines the first.", range:"The article usually distinguishes subject from predicate (Colwell's Rule — a guide, not absolute).", example:"'Lincoln was president' — 'president' defines what Lincoln was. The linking verb acts as an equals sign.", question:"What does this predicate tell you about the identity of the subject? Is it defining or describing?" },
+  conjunction:    { title:"Conjunction — How this clause connects", body:"Conjunctions tell you the logical relationship between clauses. Reading past them is one of the most common ways to miss the author's argument.", range:"ἵνα = purpose/result; ὅτι = content/reason; ὥστε = result; εἰ = condition (real); ἐάν = condition (uncertain).", example:"'So that,' 'because,' 'if,' and 'when' each signal a different relationship. Greek conjunctions do precise logical work.", question:"What relationship does this signal — goal, consequence, reason, or condition? What would be lost without it?" },
+  particle:       { title:"Particle — Tone, contrast, or emphasis", body:"Particles shade meaning in ways easy to miss in translation. γάρ = 'for/because'; δέ = mild contrast; ἀλλά = strong contrast; γέ = emphasis.", range:null, example:"'Well,' 'after all,' 'so,' and 'indeed' are small words that set tone. Greek particles do this at the sentence level.", question:"What is this contributing — explanation, contrast, emphasis, negation? What would be lost without it?" },
+  negation:       { title:"Negation — Not / No", body:"οὐ negates factual statements; μή negates commands, conditions, and purposes.", range:"Compounds: οὐκέτι = no longer; οὐδέποτε = never. Doubled negative (οὐ μή) intensifies rather than cancels.", example:"Greek distinguishes factual negations (οὐ) from volitional/conditional ones (μή). The choice reveals how the statement is framed.", question:"Is this factual (οὐ) or volitional (μή)? What is being negated — verb, adjective, or a specific element?" },
+  adverb:         { title:"Adverb — How, where, or when", body:"An adverb modifies a verb, adjective, or other adverb. It adds circumstantial detail.", range:"Manner (how), place (where), time (when). Fronted adverbs often carry emphasis.", example:"Greek adverbs commonly end in -ως. Fronting an adverb draws attention to that circumstance.", question:"What kind — manner, place, or time? Is its position emphasizing this circumstance?" },
+  unknown:        { title:"Phrase", body:"The grammatical structure is uncertain from morphology alone.", range:null, example:null, question:"Try clicking the individual words to see their parsing — you may be able to work out the structure from there." },
+};
+
+/* ── Syntax tree: helpers ────────────────────────────────────── */
+function sxPos(morph: string): string {
+  if (!morph) return "UNK";
+  const p = morph.split("-")[0];
+  if (p === "T") return "ART";
+  if (p === "N" || p === "RI") return "NOUN";
+  if (p === "V") return "VERB";
+  if (p === "A") return "ADJ";
+  if (["P","R","C","D","F","I","K","Q","X"].includes(p)) return "PRON";
+  if (p === "PREP") return "PREP";
+  if (p === "CONJ") return "CONJ";
+  if (p === "ADV") return "ADV";
+  if (p === "COND") return "COND";
+  return "PART";
+}
+
+function sxCNG(morph: string): { case: string; number: string; gender: string | null } | null {
+  if (!morph) return null;
+  for (const seg of morph.split("-").slice(1)) {
+    if (/^[NGDAV][SP][MFN]$/.test(seg)) return { case: seg[0], number: seg[1], gender: seg[2] };
+    if (/^[NGDAV][SP]$/.test(seg))       return { case: seg[0], number: seg[1], gender: null };
+    if (/^\d[NGDAV][SP]$/.test(seg))     return { case: seg[1], number: seg[2], gender: null };
+  }
+  return null;
+}
+
+function sxVerbType(morph: string): "finite" | "participle" | "infinitive" | null {
+  if (!morph || !morph.startsWith("V-")) return null;
+  const form = (morph.split("-")[1] || "").replace(/^2/, "");
+  const m = form[form.length - 1];
+  if (m === "P") return "participle";
+  if (m === "N") return "infinitive";
+  return "finite";
+}
+
+function sxVerbPerson(morph: string): number | null {
+  if (!morph || !morph.startsWith("V-")) return null;
+  const m = (morph.split("-")[2] || "").match(/^([123])/);
+  return m ? parseInt(m[1]) : null;
+}
+
+function sxGetRoleMap(words: Word[], book: string, chapter: string, verse: string): Record<number, string> | null {
+  const verseData = window.RhemaSyntax?.[book]?.[chapter]?.[verse];
+  if (!verseData?.length) return null;
+  const roleMap: Record<number, string> = {};
+  for (const [dsPos, dsStrongs, role] of verseData) {
+    const exact = dsPos - 1;
+    if (exact >= 0 && exact < words.length && words[exact][1] === dsStrongs) {
+      roleMap[exact] = role; continue;
+    }
+    const lo = Math.max(0, dsPos - 5), hi = Math.min(words.length - 1, dsPos + 1);
+    for (let i = lo; i <= hi; i++) {
+      if (words[i][1] === dsStrongs && roleMap[i] === undefined) { roleMap[i] = role; break; }
+    }
+  }
+  return Object.keys(roleMap).length ? roleMap : null;
+}
+
+function sxGroupPhrases(words: Word[]): { phrases: SxPhrase[]; cats: SxCat[] } {
+  const cats: SxCat[] = words.map((w, i) => ({
+    i, surface: w[0], strongs: w[1], morph: w[2],
+    pos: sxPos(w[2]), cng: sxCNG(w[2]), vtype: sxVerbType(w[2]),
+  }));
+  const phrases: SxPhrase[] = [];
+  let i = 0;
+  while (i < cats.length) {
+    const c = cats[i];
+    if (c.pos === "CONJ" || c.pos === "COND") {
+      phrases.push({ type: "conjunction", clauseType: SX_CLAUSE_TYPES[c.strongs] || "conjunction", role: "", label: "", color: "conj", words: [i] });
+      i++; continue;
+    }
+    if (c.pos === "ART") {
+      const g: SxPhrase = { type: "noun-phrase", role: "", label: "", color: "other", words: [i] };
+      const artCase = c.cng?.case;
+      i++;
+      while (i < cats.length) {
+        const n = cats[i];
+        if (["CONJ","COND","PREP"].includes(n.pos)) break;
+        if (n.pos === "VERB" && n.vtype === "finite") break;
+        if (n.pos === "ART" && n.cng?.case !== artCase) break;
+        if (n.pos === "ART") { g.words.push(i); i++; continue; }
+        if (n.pos === "VERB" && n.vtype === "participle") { g.type = "articular-participle"; g.words.push(i); i++; continue; }
+        if (["NOUN","ADJ","PRON"].includes(n.pos)) {
+          if (g.type === "noun-phrase" && n.pos !== "NOUN") g.type = n.pos === "ADJ" ? "adj-phrase" : "pron-phrase";
+          g.words.push(i); i++; continue;
+        }
+        break;
+      }
+      if (g.words.length === 1) {
+        if (i < cats.length && cats[i].pos === "ADV") {
+          g.type = "adv-group"; if (artCase) g.artCase = artCase; g.words.push(i); i++;
+        } else {
+          g.type = "particle";
+        }
+      }
+      phrases.push(g); continue;
+    }
+    if (c.pos === "PREP") {
+      const g: SxPhrase = { type: "prep-phrase", role: "", label: "", color: "prep", words: [i], prepStrongs: c.strongs };
+      i++;
+      let prepObjCase: string | null = null;
+      while (i < cats.length) {
+        const n = cats[i];
+        if (["CONJ","COND"].includes(n.pos)) break;
+        if (n.pos === "VERB" && n.vtype === "finite") break;
+        if (["ART","NOUN","ADJ","PRON"].includes(n.pos)) {
+          if (!prepObjCase && n.cng?.case) prepObjCase = n.cng.case;
+          g.words.push(i); i++; continue;
+        }
+        break;
+      }
+      g.prepObjCase = prepObjCase;
+      phrases.push(g); continue;
+    }
+    if (c.pos === "VERB") {
+      if (c.vtype === "finite") { phrases.push({ type: "finite-verb", role: "", label: "", color: "verb", words: [i] }); i++; continue; }
+      if (c.vtype === "participle") {
+        const g: SxPhrase = { type: "participle-phrase", role: "", label: "", color: "part", words: [i] }; i++;
+        while (i < cats.length) {
+          const n = cats[i];
+          if (["CONJ","COND","PREP","ART","VERB"].includes(n.pos)) break;
+          if (["NOUN","PRON"].includes(n.pos) && n.cng?.case === "A") { g.words.push(i); i++; continue; }
+          break;
+        }
+        phrases.push(g); continue;
+      }
+      phrases.push({ type: "infinitive", role: "", label: "", color: "part", words: [i] }); i++; continue;
+    }
+    if (c.pos === "NOUN" || c.pos === "PRON") {
+      const g: SxPhrase = { type: c.pos === "NOUN" ? "noun-phrase" : "pron-phrase", role: "", label: "", color: "other", words: [i] }; i++;
+      while (i < cats.length) {
+        if (cats[i].pos === "PRON" && cats[i].cng?.case === "G") { g.words.push(i); i++; continue; }
+        break;
+      }
+      phrases.push(g); continue;
+    }
+    if (c.pos === "ADJ") { phrases.push({ type: "adj-phrase", role: "", label: "", color: "other", words: [i] }); i++; continue; }
+    if (c.pos === "ADV") { phrases.push({ type: "adverb", role: "", label: "", color: "other", words: [i] }); i++; continue; }
+    phrases.push({ type: "particle", role: "", label: "", color: "other", words: [i] }); i++;
+  }
+  return { phrases, cats };
+}
+
+function sxAssignRoles(phrases: SxPhrase[], cats: SxCat[], roleMap: Record<number, string> | null): void {
+  const hasFiniteVerb = phrases.some(p => p.type === "finite-verb");
+  const COPULA = new Set([1510, 1096, 5225]);
+  let copulaPhrase: SxPhrase | null = null;
+  for (const p of phrases) {
+    if (p.type === "finite-verb" && COPULA.has(cats[p.words[0]]?.strongs)) { copulaPhrase = p; break; }
+  }
+  const hasCopula = !!copulaPhrase;
+  const copulaPerson = copulaPhrase ? sxVerbPerson(cats[copulaPhrase.words[0]]?.morph || "") : null;
+  const EXPLICIT_SUBJ = new Set([1473, 4771, 2249, 5210]);
+  const implicitSubject = hasCopula && (copulaPerson === 1 || copulaPerson === 2);
+  let nomCount = 0, predNomAssigned = 0;
+  const copulaCount = phrases.filter(p => p.type === "finite-verb" && COPULA.has(cats[p.words[0]]?.strongs)).length;
+
+  for (const p of phrases) {
+    if (p.type === "finite-verb") {
+      p.role = "predicate"; p.label = "Verb"; p.color = "verb"; p.isMainVerb = true;
+    } else if (p.type === "conjunction") {
+      p.role = "conjunction"; p.label = SX_CLAUSE_LABELS[p.clauseType || ""] || "Conjunction"; p.color = "conj";
+    } else if (p.type === "prep-phrase") {
+      p.role = "modifier"; p.color = "prep";
+      const fn = p.prepStrongs ? SX_PREP_LABELS[p.prepStrongs] : null;
+      const prepLabel = fn ? fn(p.prepObjCase || null) : null;
+      p.label = prepLabel ? prepLabel.charAt(0).toUpperCase() + prepLabel.slice(1) : "Prep. Phrase";
+      p.plainLabel = prepLabel || "how / where / by what";
+    } else if (p.type === "adv-group") {
+      p.role = "adv-group"; p.label = "Group"; p.color = "other"; p.plainLabel = "which group";
+    } else if (p.type === "adverb") {
+      const fs = cats[p.words[0]]?.strongs;
+      p.label = "Adverb"; p.color = "other";
+      if (SX_NEG_STRONGS.has(fs!)) { p.role = "negation"; p.label = "Negation"; p.plainLabel = "negates"; }
+      else if (SX_DIST_STRONGS.has(fs!)) { p.role = "adverb"; p.plainLabel = "how far / where"; }
+      else if (SX_LOC_STRONGS.has(fs!))  { p.role = "adverb"; p.plainLabel = "state / location"; }
+      else if (SX_TIME_STRONGS.has(fs!)) { p.role = "adverb"; p.plainLabel = "when"; }
+      else { p.role = "adverb"; p.plainLabel = "describes"; }
+    } else if (p.type === "articular-participle") {
+      p.role = "attributive"; p.label = "Attr. Participle"; p.color = "part";
+    } else if (p.type === "participle-phrase") {
+      p.role = "circumstantial"; p.label = "Participle"; p.color = "part";
+    } else if (p.type === "infinitive") {
+      p.role = "infinitive"; p.label = "Infinitive"; p.color = "part";
+    } else if (p.type === "particle") {
+      const fs = cats[p.words[0]]?.strongs;
+      if (SX_NEG_STRONGS.has(fs!)) { p.role = "negation"; p.label = "Negation"; p.color = "other"; p.plainLabel = "negates"; }
+      else if (SX_CLAUSE_TYPES[fs!]) { p.role = "conjunction"; p.label = SX_CLAUSE_LABELS[SX_CLAUSE_TYPES[fs!]] || "Connects"; p.color = "conj"; p.plainLabel = "connects"; }
+      else { p.role = "particle"; p.label = "Particle"; p.color = "other"; }
+    } else {
+      const cng = cats[p.words[0]]?.cng;
+      if (!cng) { p.role = "unknown"; p.label = "?"; p.color = "other"; continue; }
+      if (cng.case === "N") {
+        const fs = cats[p.words[0]]?.strongs;
+        if (hasCopula && implicitSubject && !EXPLICIT_SUBJ.has(fs!)) {
+          p.role = "prednom"; p.label = "Predicate"; p.color = "verb";
+          p.plainLabel = copulaPerson === 2 ? "what you are" : "what I am";
+          predNomAssigned++;
+        } else if (hasCopula) {
+          nomCount++;
+          if (nomCount > 1 && predNomAssigned < copulaCount) {
+            predNomAssigned++; p.role = "prednom"; p.label = "Predicate"; p.color = "verb";
+          } else {
+            p.role = "subject"; p.label = "Subject"; p.color = "subj";
+          }
+        } else {
+          p.role = "subject"; p.label = "Subject"; p.color = "subj";
+        }
+      } else {
+        const cm: Record<string, { role: string; label: string; color: string }> = {
+          G: { role:"genitive",  label:"Genitive",  color:"gen" },
+          D: { role:"dative",    label:"Dative",    color:"dat" },
+          A: { role: hasFiniteVerb ? "object" : "accusative", label: hasFiniteVerb ? "Object" : "Accusative", color:"obj" },
+          V: { role:"vocative",  label:"Address",   color:"subj" },
+        };
+        const m = cm[cng.case] || { role:"unknown", label:"?", color:"other" };
+        p.role = m.role; p.label = m.label; p.color = m.color;
+      }
+    }
+  }
+  const DEP_ANCHORS = new Set(["subject","object","prednom"]);
+  for (let i = 1; i < phrases.length; i++) {
+    if (phrases[i].role === "genitive" && DEP_ANCHORS.has(phrases[i-1].role)) phrases[i].isDep = true;
+  }
+  if (roleMap) {
+    for (const p of phrases) {
+      for (const wi of p.words) {
+        const dr = roleMap[wi];
+        if (!dr) continue;
+        if (dr === "p") { p.role = "prednom"; p.label = "Predicate"; p.color = "verb"; p.fromDataset = true; if (!p.plainLabel) p.plainLabel = copulaPerson === 2 ? "what you are" : "what it is"; }
+        else if (dr === "s") { p.role = "subject"; p.label = "Subject"; p.color = "subj"; p.fromDataset = true; delete p.plainLabel; }
+        else if (dr === "o") { p.role = "object"; p.label = "Object"; p.color = "obj"; p.fromDataset = true; delete p.plainLabel; }
+        else if (dr === "o2") { p.role = "object"; p.label = "Object (2)"; p.color = "obj"; p.fromDataset = true; }
+        break;
+      }
+    }
+  }
+}
+
+function sxBuildTree(words: Word[], book: string, chapter: string, verse: string): { tree: SxClause; cats: SxCat[] } {
+  const { phrases, cats } = sxGroupPhrases(words);
+  const roleMap = sxGetRoleMap(words, book, chapter, verse);
+  sxAssignRoles(phrases, cats, roleMap);
+
+  /* Fix subject labels in passive segments */
+  for (let pi = 0; pi < phrases.length; pi++) {
+    const verbP = phrases[pi];
+    if (verbP.type !== "finite-verb") continue;
+    const morph = cats[verbP.words[0]]?.morph || "";
+    const form = (morph.split("-")[1] || "").replace(/^2/, "");
+    const voice = form[1];
+    if (voice === "P" || voice === "O" || voice === "N") {
+      for (const p of phrases) {
+        if (p.role === "subject" && !p.fromDataset) p.plainLabel = "who / what is acted on";
+      }
+    }
+  }
+
+  const SX_NONSPLIT = new Set(["explanatory","inferential","conjunction"]);
+  const segments: SxClause[] = [];
+  let cur: SxClause = { clauseType: "main", label: "Main Clause", conjPhrase: null, phrases: [], isSubordinate: false, children: [] };
+  for (const p of phrases) {
+    if (p.type === "conjunction") {
+      if (SX_NONSPLIT.has(p.clauseType || "")) { cur.phrases.push(p); continue; }
+      const isSubord = !["coordinating","adversative","alternative"].includes(p.clauseType || "");
+      if (cur.phrases.length || cur.conjPhrase) segments.push(cur);
+      cur = { clauseType: p.clauseType || "conjunction", label: SX_CLAUSE_LABELS[p.clauseType || ""] || "Clause", conjPhrase: p, phrases: [], isSubordinate: isSubord, children: [] };
+    } else {
+      cur.phrases.push(p);
+    }
+  }
+  if (cur.phrases.length || cur.conjPhrase) segments.push(cur);
+  if (!segments.length) segments.push({ clauseType: "main", label: "Main Clause", conjPhrase: null, phrases, isSubordinate: false, children: [] });
+
+  const roots: SxClause[] = [];
+  const stk: SxClause[] = [];
+  for (const seg of segments) {
+    if (!seg.isSubordinate) {
+      if (!stk.length) { roots.push(seg); stk.push(seg); }
+      else { if (stk.length > 1) stk.pop(); stk[stk.length-1].children.push(seg); stk.push(seg); }
+    } else {
+      if (stk.length) stk[stk.length-1].children.push(seg);
+      else roots.push(seg);
+      stk.push(seg);
+    }
+  }
+
+  const tree = roots.length === 1 ? roots[0] : {
+    clauseType: "main", label: "Main Clause", conjPhrase: null, phrases: [], isSubordinate: false, children: roots,
+  };
+  return { tree, cats };
+}
+
 /* ── Main component ─────────────────────────────────────────── */
 export default function RhemaPage() {
   const { user } = useAuthContext();
@@ -301,6 +686,8 @@ export default function RhemaPage() {
   const [bookSearch, setBookSearch] = useState("");
   const [grammarModal, setGrammarModal] = useState<{ category: string; value: string } | null>(null);
   const [showWandPopup, setShowWandPopup] = useState(false);
+  const [syntaxMode, setSyntaxMode] = useState(false);
+  const [selectedSxPhrase, setSelectedSxPhrase] = useState<SxPhrase | null>(null);
   const [, forceUpdate] = useState(0);
   const loadingRef = useRef(false);
 
@@ -417,6 +804,7 @@ export default function RhemaPage() {
         setShowHighlighter(false);
         setShowLibrary(false);
         setShowWandPopup(false);
+        setSelectedSxPhrase(null);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -522,6 +910,7 @@ export default function RhemaPage() {
     setShowHighlighter(false);
     setShowLibrary(false);
     setShowWandPopup(false);
+    setSelectedSxPhrase(null);
   }
 
   /* ── Computed values ── */
@@ -533,7 +922,7 @@ export default function RhemaPage() {
   const variantSet  = loaded ? getVariantSet(book, chapter, verse, textMode) : new Set<number>();
   const crossRefs   = loaded ? (window.RhemaCrossRefs?.[`${book} ${chapter}:${verse}`] || null) : null;
   const hasCrossRefs = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
-  const hasActiveMode = fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0;
+  const hasActiveMode = syntaxMode || fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0;
 
   /* POS categories present in the current verse */
   const versePosCats = useMemo(() => {
@@ -707,9 +1096,11 @@ export default function RhemaPage() {
             </button>
             {showWandPopup && (
               <WandPopup
-                fullChapter={fullChapter} greekOnly={greekOnly} showEnglish={showEnglish}
+                syntaxMode={syntaxMode} fullChapter={fullChapter}
+                greekOnly={greekOnly} showEnglish={showEnglish}
                 textMode={textMode} showHighlighter={showHighlighter}
                 intendedCount={intendedHighlights.size}
+                onToggleSyntax={() => { setSyntaxMode(v => !v); setShowWandPopup(false); setSelectedSxPhrase(null); }}
                 onToggleChapter={() => setFullChapter(v => !v)}
                 onToggleGreekOnly={() => setGreekOnly(v => !v)}
                 onToggleEnglish={() => setShowEnglish(v => !v)}
@@ -761,7 +1152,13 @@ export default function RhemaPage() {
       {/* ── Body ── */}
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 overflow-y-auto p-6 min-w-0">
-          {fullChapter ? (
+          {syntaxMode ? (
+            <SyntaxView
+              book={book} chapter={chapter} verse={verse} textMode={textMode}
+              onPhraseClick={(p) => { setSelectedSxPhrase(p); setActiveWord(null); setShowCrossRefs(false); setShowNotes(false); setShowLibrary(false); }}
+              englishText={englishText} englishLabel={getEnglishLabel(textMode)}
+            />
+          ) : fullChapter ? (
             <ChapterView
               book={book} chapter={chapter} verse={verse}
               textMode={textMode} greekOnly={greekOnly} showEnglish={showEnglish}
@@ -782,7 +1179,10 @@ export default function RhemaPage() {
         </div>
 
         {/* Right panels */}
-        {activeWord && !showCrossRefs && !showNotes && !showLibrary && (
+        {selectedSxPhrase && !showCrossRefs && !showNotes && !showLibrary && (
+          <SyntaxRolePanel phrase={selectedSxPhrase} onClose={() => setSelectedSxPhrase(null)} />
+        )}
+        {!selectedSxPhrase && activeWord && !showCrossRefs && !showNotes && !showLibrary && (
           <WordDetail
             word={activeWord} activeTab={activeTab} setActiveTab={setActiveTab}
             textMode={textMode} book={book} chapter={chapter} verse={verse}
@@ -794,7 +1194,7 @@ export default function RhemaPage() {
         {showCrossRefs && (
           <CrossRefsPanel
             book={book} chapter={chapter} verse={verse}
-            crossRefs={crossRefs}
+            crossRefs={crossRefs} textMode={textMode}
             onClose={() => setShowCrossRefs(false)}
             onNavigate={(b, ch, v) => { handleNavigateOccurrence(b, ch, v); setShowCrossRefs(false); }}
           />
@@ -917,6 +1317,148 @@ export default function RhemaPage() {
           onClose={() => setGrammarModal(null)}
         />
       )}
+    </div>
+  );
+}
+
+/* ── SyntaxView ─────────────────────────────────────────────── */
+function SyntaxView({ book, chapter, verse, textMode, onPhraseClick, englishText, englishLabel }: {
+  book: string; chapter: string; verse: string; textMode: TextMode;
+  onPhraseClick: (p: SxPhrase) => void;
+  englishText: string; englishLabel: string;
+}) {
+  const words = getWords(book, chapter, verse, textMode);
+  if (!words.length) return <p className="text-sm text-text-muted opacity-60">No verse data.</p>;
+  const { tree, cats } = sxBuildTree(words, book, chapter, verse);
+  const ref = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+  return (
+    <div className="max-w-3xl">
+      <div className="flex items-center gap-3 mb-5">
+        <p className="text-xs font-semibold text-accent uppercase tracking-widest">{ref}</p>
+        <span className="text-xs text-text-muted opacity-50">Syntax Diagram</span>
+      </div>
+      <SyntaxBranch clause={tree} words={words} cats={cats} onPhraseClick={onPhraseClick} depth={0} />
+      {englishText && (
+        <div className="border-t border-border-subtle pt-5 mt-6">
+          <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-2">{englishLabel}</p>
+          <p className="text-base text-text-muted leading-relaxed">{englishText}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SyntaxBranch({ clause, words, cats, onPhraseClick, depth }: {
+  clause: SxClause; words: Word[]; cats: SxCat[];
+  onPhraseClick: (p: SxPhrase) => void; depth: number;
+}) {
+  const color = SX_CLAUSE_COLORS[clause.clauseType] || "#c9a84c";
+  const subtitle = SX_CLAUSE_SUBTITLES[clause.clauseType];
+  const isSynthetic = !clause.conjPhrase && !clause.phrases.length && clause.children.length > 0;
+
+  if (isSynthetic) {
+    return (
+      <div className="flex flex-col gap-3">
+        {clause.children.map((child, i) => (
+          <SyntaxBranch key={i} clause={child} words={words} cats={cats} onPhraseClick={onPhraseClick} depth={depth} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn("flex flex-col gap-2", depth > 0 && "ml-8 pl-4 border-l-2")}
+      style={{ borderColor: depth > 0 ? color : undefined }}>
+      {/* Clause header */}
+      <div className="flex items-center gap-2 mb-0.5">
+        <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color }}>{clause.label}</span>
+        {subtitle && <span className="text-[11px] text-text-muted opacity-60">{subtitle}</span>}
+      </div>
+      {/* Phrase chips */}
+      <div className="flex flex-wrap gap-2">
+        {clause.phrases.map((p, i) => (
+          <SyntaxPhraseChip key={i} phrase={p} words={words} cats={cats} onClick={() => onPhraseClick(p)} />
+        ))}
+      </div>
+      {/* Children */}
+      {clause.children.length > 0 && (
+        <div className="flex flex-col gap-3 mt-2">
+          {clause.children.map((child, i) => (
+            <SyntaxBranch key={i} clause={child} words={words} cats={cats} onPhraseClick={onPhraseClick} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SyntaxPhraseChip({ phrase, words, cats, onClick }: {
+  phrase: SxPhrase; words: Word[]; cats: SxCat[]; onClick: () => void;
+}) {
+  const chip = SX_CHIP[phrase.color] || SX_CHIP.other;
+  const greekWords = phrase.words.map(wi => words[wi]?.[0] || "").filter(Boolean);
+  const glossWords = phrase.words.map(wi => {
+    const w = words[wi];
+    if (!w) return "";
+    const lex = getLex(w[1]);
+    return getWordGloss(lex, w[2]);
+  }).filter(Boolean);
+
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex flex-col gap-1 px-2.5 py-2 border text-left transition-colors hover:opacity-80 min-w-0",
+        chip.border, chip.bg
+      )}
+    >
+      <span className={cn("text-[10px] font-semibold uppercase tracking-widest leading-none", chip.text)}>
+        {phrase.plainLabel || phrase.label}
+      </span>
+      <span className="text-lg leading-tight" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
+        {greekWords.join(" ")}
+      </span>
+      {glossWords.length > 0 && (
+        <span className="text-xs text-text-muted italic leading-tight">{glossWords.join(" ")}</span>
+      )}
+    </button>
+  );
+}
+
+/* ── SyntaxRolePanel ─────────────────────────────────────────── */
+function SyntaxRolePanel({ phrase, onClose }: { phrase: SxPhrase; onClose: () => void }) {
+  const info = SX_ROLE_INFO[phrase.role] || SX_ROLE_INFO.unknown;
+  const chip = SX_CHIP[phrase.color] || SX_CHIP.other;
+  return (
+    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+      <div className="px-4 pt-4 pb-3 border-b border-border-subtle flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <span className={cn("text-[10px] font-semibold uppercase tracking-widest", chip.text)}>
+            {phrase.plainLabel || phrase.label}
+          </span>
+          <p className="text-xs font-semibold text-text-primary mt-1 leading-tight">{info.title}</p>
+        </div>
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary shrink-0 mt-0.5"><X className="h-4 w-4" /></button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+        <p className="text-sm text-text-muted leading-relaxed">{info.body}</p>
+        {info.range && (
+          <div>
+            <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Range of meanings</p>
+            <p className="text-sm text-text-muted leading-relaxed">{info.range}</p>
+          </div>
+        )}
+        {info.example && (
+          <div>
+            <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">English parallel</p>
+            <p className="text-sm text-text-muted leading-relaxed italic">{info.example}</p>
+          </div>
+        )}
+        <div className="p-3 bg-accent/5 border-l-2 border-accent/40">
+          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1.5">For your study</p>
+          <p className="text-sm text-text-primary leading-relaxed">{info.question}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1224,7 +1766,8 @@ function ParsingTab({ surface, strongs, morph, book, chapter, verse, wordIdx, on
 }) {
   const rows: MorphRow[] = decodeMorph(morph);
   const lex = getLex(strongs);
-  const syntaxRole = window.RhemaSyntax?.[book]?.[chapter]?.[verse]?.[wordIdx]?.role;
+  const sxEntry = window.RhemaSyntax?.[book]?.[chapter]?.[verse]?.find(([pos, str]) => pos - 1 === wordIdx && str === strongs);
+  const syntaxRole = sxEntry?.[2];
 
   if (!rows.length) {
     return <p className="text-sm text-text-muted opacity-60">No parsing data for &ldquo;{morph}&rdquo;.</p>;
@@ -1403,35 +1946,51 @@ function BookOccurrences({ book, strongs, textMode, onNavigate }: {
 }
 
 /* ── CrossRefsPanel ─────────────────────────────────────────── */
-function CrossRefsPanel({ book, chapter, verse, crossRefs, onClose, onNavigate }: {
+const CROSS_REF_ICONS: Record<string, string> = {
+  d: "↔", t: "📖", o: "🔗", n: "✦", f: "◆", p: "⟶", a: "∥", e: "◉",
+};
+
+function CrossRefsPanel({ book, chapter, verse, crossRefs, onClose, onNavigate, textMode }: {
   book: string; chapter: string; verse: string;
   crossRefs: Record<string, string[]> | null;
   onClose: () => void;
   onNavigate: (book: string, ch: string, v: string) => void;
+  textMode: TextMode;
 }) {
   const labels = window.RhemaCrossRefLabels || [];
+  const hasAny = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
   return (
     <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
       <PanelHeader title="Cross References" subtitle={`${BOOK_NAMES[book] || book} ${chapter}:${verse}`} onClose={onClose} />
-      <div className="flex-1 overflow-y-auto p-4">
-        {!crossRefs || !Object.values(crossRefs).some(a => a?.length > 0) ? (
-          <p className="text-sm text-text-muted opacity-60">No cross references for this verse.</p>
+      <div className="flex-1 overflow-y-auto">
+        {!hasAny ? (
+          <p className="text-sm text-text-muted opacity-60 p-4">No cross references for this verse.</p>
         ) : (
-          <div className="flex flex-col gap-4">
-            {Object.entries(crossRefs).map(([key, refs], ci) => {
+          <div className="flex flex-col">
+            {Object.entries(crossRefs!).map(([key, refs], ci) => {
               if (!refs?.length) return null;
               const label = labels[ci] || CROSS_REF_LABELS[key] || key.toUpperCase();
+              const icon = CROSS_REF_ICONS[key] || "•";
               return (
-                <div key={key}>
-                  <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1.5">{label}</p>
-                  <div className="flex flex-col gap-0.5">
+                <div key={key} className="border-b border-border-subtle/50 last:border-0">
+                  <p className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-text-muted uppercase tracking-widest flex items-center gap-1.5">
+                    <span className="opacity-60">{icon}</span>{label}
+                  </p>
+                  <div className="flex flex-col divide-y divide-border-subtle/30">
                     {refs.map((r, i) => {
                       const parsed = parseCrossRefKey(r);
                       if (!parsed) return null;
+                      const preview = getEnglishText(parsed.book, parsed.ch, parsed.v, textMode);
+                      const previewShort = preview.length > 80 ? preview.slice(0, 77) + "…" : preview;
                       return (
                         <button key={i} onClick={() => onNavigate(parsed.book, parsed.ch, parsed.v)}
-                          className="w-full text-left px-2 py-1.5 text-xs text-text-muted hover:text-accent hover:bg-bg-elevated transition-colors">
-                          {BOOK_NAMES[parsed.book] || parsed.book} {parsed.ch}:{parsed.v}
+                          className="w-full text-left px-4 py-2.5 hover:bg-bg-elevated transition-colors group">
+                          <p className="text-xs font-semibold text-accent group-hover:text-accent-hover mb-0.5">
+                            {BOOK_NAMES[parsed.book] || parsed.book} {parsed.ch}:{parsed.v}
+                          </p>
+                          {previewShort && (
+                            <p className="text-[11px] text-text-muted leading-relaxed opacity-70">{previewShort}</p>
+                          )}
                         </button>
                       );
                     })}
@@ -1448,16 +2007,18 @@ function CrossRefsPanel({ book, chapter, verse, crossRefs, onClose, onNavigate }
 
 /* ── WandPopup ──────────────────────────────────────────────── */
 function WandPopup({
-  fullChapter, greekOnly, showEnglish, textMode, showHighlighter, intendedCount,
-  onToggleChapter, onToggleGreekOnly, onToggleEnglish, onToggleTextMode, onToggleHighlight,
+  syntaxMode, fullChapter, greekOnly, showEnglish, textMode, showHighlighter, intendedCount,
+  onToggleSyntax, onToggleChapter, onToggleGreekOnly, onToggleEnglish, onToggleTextMode, onToggleHighlight,
 }: {
-  fullChapter: boolean; greekOnly: boolean; showEnglish: boolean; textMode: TextMode;
+  syntaxMode: boolean; fullChapter: boolean; greekOnly: boolean; showEnglish: boolean; textMode: TextMode;
   showHighlighter: boolean; intendedCount: number;
-  onToggleChapter: () => void; onToggleGreekOnly: () => void;
+  onToggleSyntax: () => void; onToggleChapter: () => void; onToggleGreekOnly: () => void;
   onToggleEnglish: () => void; onToggleTextMode: () => void; onToggleHighlight: () => void;
 }) {
   return (
     <div className="absolute right-0 top-full mt-1 w-56 bg-bg-surface border border-border-subtle shadow-2xl z-[39] py-1.5">
+      <WandItem active={syntaxMode} label="Syntax Diagram" desc="See clause structure & grammar roles" onClick={onToggleSyntax} />
+      <div className="my-1 border-t border-border-subtle/60" />
       <WandItem active={greekOnly} label="Greek Only" desc="Hide word glosses beneath text" onClick={onToggleGreekOnly} />
       <WandItem active={fullChapter} label="Full Chapter" desc="Show all verses at once" onClick={onToggleChapter} />
       {!greekOnly && (
