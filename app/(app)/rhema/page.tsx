@@ -299,9 +299,9 @@ export default function RhemaPage() {
   const [chPickerOpen, setChPickerOpen] = useState(false);
   const [vPickerOpen, setVPickerOpen] = useState(false);
   const [bookSearch, setBookSearch] = useState("");
+  const [grammarModal, setGrammarModal] = useState<{ category: string; value: string } | null>(null);
   const [, forceUpdate] = useState(0);
   const loadingRef = useRef(false);
-  const verseDisplayRef = useRef<HTMLDivElement>(null);
 
   // Navigation history (persisted in localStorage)
   const [navHistory, setNavHistory] = useState<Array<{ book: string; chapter: string; verse: string }>>([]);
@@ -406,6 +406,7 @@ export default function RhemaPage() {
       if (e.key === "ArrowRight") navigateVerse(1);
       if (e.key === "ArrowLeft")  navigateVerse(-1);
       if (e.key === "Escape") {
+        setGrammarModal(null);
         setActiveWord(null);
         setBookPickerOpen(false);
         setChPickerOpen(false);
@@ -448,22 +449,6 @@ export default function RhemaPage() {
       }
     }
   }, [book, chapter, verse, textMode]);
-
-  /* Touch swipe to navigate verses */
-  useEffect(() => {
-    const el = verseDisplayRef.current;
-    if (!el || !loaded) return;
-    let startX = 0, startY = 0;
-    const onStart = (e: TouchEvent) => { startX = e.touches[0].clientX; startY = e.touches[0].clientY; };
-    const onEnd = (e: TouchEvent) => {
-      const dx = e.changedTouches[0].clientX - startX;
-      const dy = e.changedTouches[0].clientY - startY;
-      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) navigateVerse(dx > 0 ? -1 : 1);
-    };
-    el.addEventListener("touchstart", onStart, { passive: true });
-    el.addEventListener("touchend", onEnd, { passive: true });
-    return () => { el.removeEventListener("touchstart", onStart); el.removeEventListener("touchend", onEnd); };
-  }, [loaded, navigateVerse]);
 
   function selectBook(code: string) {
     const chs = getChapters(code, textMode);
@@ -710,8 +695,14 @@ export default function RhemaPage() {
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
           <ToggleBtn active={fullChapter} onClick={() => setFullChapter(v => !v)} label="Chapter" />
-          <ToggleBtn active={greekOnly} onClick={() => setGreekOnly(v => !v)} label="Greek Only" />
-          {!greekOnly && <ToggleBtn active={showEnglish} onClick={() => setShowEnglish(v => !v)} label="English" />}
+          <ToggleBtn active={greekOnly} onClick={() => setGreekOnly(v => !v)} label="Gk Only" />
+          {!greekOnly && (
+            <ToggleBtn
+              active={showEnglish}
+              onClick={() => setShowEnglish(v => !v)}
+              label={showEnglish ? getEnglishLabel(textMode) : "English"}
+            />
+          )}
           <ToggleBtn
             active={textMode === "critical"}
             onClick={() => setTextMode(m => m === "critical" ? "majority" : "critical")}
@@ -746,7 +737,7 @@ export default function RhemaPage() {
 
       {/* ── Body ── */}
       <div className="flex flex-1 min-h-0">
-        <div ref={verseDisplayRef} className="flex-1 overflow-y-auto p-6 min-w-0">
+        <div className="flex-1 overflow-y-auto p-6 min-w-0">
           {fullChapter ? (
             <ChapterView
               book={book} chapter={chapter} verse={verse}
@@ -774,6 +765,7 @@ export default function RhemaPage() {
             textMode={textMode} book={book} chapter={chapter} verse={verse}
             onClose={() => setActiveWord(null)}
             onNavigateOccurrence={handleNavigateOccurrence}
+            onGrammarExample={(cat, val) => setGrammarModal({ category: cat, value: val })}
           />
         )}
         {showCrossRefs && (
@@ -899,6 +891,86 @@ export default function RhemaPage() {
           </div>
         </PickerOverlay>
       )}
+
+      {/* ── Grammar examples modal ── */}
+      {grammarModal && (
+        <GrammarExamplesModal
+          category={grammarModal.category}
+          value={grammarModal.value}
+          onClose={() => setGrammarModal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── GrammarExamplesModal ───────────────────────────────────── */
+const GRAMMAR_EXAMPLES: Record<string, Record<string, { title: string; en: string; body: string }>> = {
+  tense: {
+    "Present":     { title: "Present Tense",    en: '"He is writing" or "He writes"',                        body: "The present tense describes action happening now or as an ongoing habit. In Greek it emphasizes the continuous or repeated nature of the action. ὁ ἄνθρωπος γράφει — \"The man is writing (right now / habitually).\"" },
+    "Imperfect":   { title: "Imperfect Tense",  en: '"He was writing"',                                      body: "The imperfect describes continuous or repeated action in past time. It paints a scene of ongoing activity. ἔγραφεν — \"He was writing (over and over, or for a period of time).\"" },
+    "Aorist":      { title: "Aorist Tense",     en: '"He wrote" or "He wrote it (once)"',                    body: "The aorist views an action as a simple completed event without stressing duration. It's the default \"past tense\" of Greek narrative. ἔγραψεν — \"He wrote\" — a single point event." },
+    "2nd Aorist":  { title: "2nd Aorist Tense", en: '"He threw" (irregular stem)',                           body: "Same meaning as the aorist — a completed past event — but the verb uses a different stem form (like English \"throw/threw\"). The grammar is identical; only the form differs." },
+    "Perfect":     { title: "Perfect Tense",    en: '"He has written" (and the letter still exists)',         body: "The perfect describes a past completed action whose results are still felt now. λέλυκεν — \"He has loosed\" — it's done and the loosing matters now. Theologically powerful: τετέλεσται, \"It is finished.\"" },
+    "2nd Perfect": { title: "2nd Perfect Tense",en: '"He has become" (irregular stem)',                      body: "Same meaning as the perfect — past action with present result — using an alternate stem. οἶδα (\"I know\") is technically a perfect-tense form meaning \"I have come to know = I know.\"" },
+    "Pluperfect":  { title: "Pluperfect Tense", en: '"He had written" (before something else happened)',     body: "The pluperfect describes a completed action in the past whose result was felt at a prior past point. Rare in the NT. ᾔδει — \"He had known (before that moment).\"" },
+    "Future":      { title: "Future Tense",     en: '"He will write"',                                      body: "The future describes expected or anticipated action. It can be predictive (will happen), deliberate (planning), or imperatival. σώσει — \"He will save.\"" },
+  },
+  voice: {
+    "Active":           { title: "Active Voice",         en: '"Paul wrote the letter"',                              body: "The subject performs the action on something or someone outside itself. The most common voice. ἔγραψεν Παῦλος — Paul (subject) acted." },
+    "Middle":           { title: "Middle Voice",         en: '"He washed himself" or "He had himself healed"',       body: "The subject participates in or benefits from the action. Often means the subject acts for its own interest. No exact English equivalent — sometimes translated active, sometimes reflexive." },
+    "Passive":          { title: "Passive Voice",        en: '"He was healed" or "The letter was written"',          body: "The subject receives the action from an outside agent. ἐθεραπεύθη — \"He was healed (by someone).\" Greek passive is often used for divine action: \"was justified,\" \"was saved.\"" },
+    "Middle/Deponent":  { title: "Middle/Deponent",      en: '"He answered" or "He came"',                           body: "Deponent verbs have middle or passive form but active meaning — they never appear in the active voice. ἔρχομαι — \"I come\" — looks middle/passive but means active. Common deponents: ἔρχομαι, ἀποκρίνομαι, γίνομαι." },
+    "Middle-Passive":   { title: "Middle-Passive Voice", en: 'Could be "he washed himself" or "he was washed"',     body: "Some forms are identical in the middle and passive. Context and the tense system determine which is meant. In the present/imperfect, middle and passive forms are identical." },
+    "Middle or Passive":{ title: "Middle or Passive",    en: 'Context determines: "he washed" or "he was washed"',  body: "Form is ambiguous between middle and passive. Check the tense, context, and lexical notes to determine which nuance applies." },
+    "Middle Deponent":  { title: "Middle Deponent",      en: '"He asked" or "He came"',                              body: "A deponent using specifically the middle form. Active meaning, middle form. Common in NT Greek." },
+  },
+  mood: {
+    "Indicative":  { title: "Indicative Mood",  en: '"He goes to the temple" (stating a fact)',           body: "The indicative asserts something as actual — a statement of reality. The most common mood. ὑπάγει — \"He goes.\" Negated with οὐ (not μή)." },
+    "Subjunctive": { title: "Subjunctive Mood", en: '"that he might go" or "if he goes"',                  body: "The subjunctive expresses possibility, purpose, condition, or contingency. Always with ἵνα (purpose), ἐάν (if), or μή (prohibition). ἵνα σωθῶσιν — \"that they might be saved.\"" },
+    "Optative":    { title: "Optative Mood",    en: '"May it never be!" (μὴ γένοιτο)',                    body: "The optative expresses a wish, prayer, or remote possibility. Rare in the NT (67 occurrences). Paul's famous μὴ γένοιτο — \"May it never be!\" / \"God forbid!\" — is optative." },
+    "Imperative":  { title: "Imperative Mood",  en: '"Go!" or "Love one another!"',                       body: "The imperative gives a command or prohibition. 2nd person imperative is most common. ἀγαπᾶτε ἀλλήλους — \"Love one another!\" Prohibitions use μή + imperative or subjunctive." },
+    "Infinitive":  { title: "Infinitive Mood",  en: '"to go" or "going"',                                 body: "The infinitive is a verbal noun — it can be a subject, object, or complement. θέλω πιστεύειν — \"I want to believe.\" Often used in purpose or result clauses." },
+    "Participle":  { title: "Participle Mood",  en: '"the one going" or "while going"',                   body: "The participle is a verbal adjective — it has tense and voice like a verb, plus case/number/gender like a noun. It modifies nouns or expresses attendant circumstances. Often translated \"while Xing,\" \"after Xing,\" or \"the one who X.\"" },
+  },
+};
+
+function GrammarExamplesModal({ category, value, onClose }: {
+  category: string; value: string; onClose: () => void;
+}) {
+  const entry = GRAMMAR_EXAMPLES[category.toLowerCase()]?.[value];
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-bg-surface border border-border-subtle shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
+          <h2 className="text-sm font-semibold text-text-primary">
+            {entry?.title ?? `${value} — Grammar Example`}
+          </h2>
+          <button onClick={onClose} className="text-text-muted hover:text-text-primary ml-4 shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="px-5 py-5 flex flex-col gap-4">
+          {entry ? (
+            <>
+              <p className="text-base text-accent font-medium italic">{entry.en}</p>
+              <p className="text-sm text-text-muted leading-relaxed">{entry.body}</p>
+            </>
+          ) : (
+            <p className="text-sm text-text-muted opacity-60">No example available for &ldquo;{value}&rdquo;.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1049,37 +1121,51 @@ function WordChip({
 
 /* ── WordDetail panel ───────────────────────────────────────── */
 function WordDetail({
-  word, activeTab, setActiveTab, textMode, book, chapter, verse, onClose, onNavigateOccurrence,
+  word, activeTab, setActiveTab, textMode, book, chapter, verse, onClose, onNavigateOccurrence, onGrammarExample,
 }: {
   word: Word; activeTab: ActiveTab; setActiveTab: (t: ActiveTab) => void;
   textMode: TextMode; book: string; chapter: string; verse: string;
   onClose: () => void;
   onNavigateOccurrence: (book: string, ch: string, v: string) => void;
+  onGrammarExample: (category: string, value: string) => void;
 }) {
   const [surface, strongs, morph] = word;
   const lex = getLex(strongs);
-  const quick = getQuickDef(lex);
   const words = getWords(book, chapter, verse, textMode);
   const wordIdx = words.findIndex(w => w[0] === surface && w[1] === strongs && w[2] === morph);
+  const strongs_label = strongs ? `G${strongs}` : "LXX";
+  const inflected = getWordGloss(lex, morph);
 
   return (
-    <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
-      <div className="px-4 py-4 border-b border-border-subtle flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-2xl text-text-primary leading-none mb-1" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{surface}</p>
-          {lex.lemma && <p className="text-sm text-accent font-medium" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{lex.lemma}</p>}
-          {lex.translit && <p className="text-xs text-text-muted italic">{lex.translit}</p>}
-          {quick && <p className="text-xs text-text-muted mt-1 leading-relaxed line-clamp-2">{quick}</p>}
+    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3 border-b border-border-subtle flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="text-2xl text-text-primary leading-none" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{surface}</span>
+            <span className="text-xs text-text-muted font-mono opacity-60">{strongs_label}</span>
+          </div>
+          {lex.lemma && (
+            <p className="text-sm text-accent" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
+              {lex.lemma}{lex.translit ? <span className="text-xs text-text-muted italic font-sans ml-2">{lex.translit}</span> : null}
+            </p>
+          )}
+          {inflected && (
+            <p className="text-xs text-text-muted mt-1.5 px-2 py-1 bg-bg-elevated border-l-2 border-accent/40 italic">
+              &ldquo;{inflected}&rdquo;
+            </p>
+          )}
         </div>
         <button onClick={onClose} className="text-text-muted hover:text-text-primary shrink-0 mt-0.5"><X className="h-4 w-4" /></button>
       </div>
 
+      {/* Tabs */}
       <div className="flex border-b border-border-subtle">
         {(["parsing","definition","occurrences"] as ActiveTab[]).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
-            className={cn("flex-1 py-2 text-xs font-medium capitalize transition-colors border-b-2",
+            className={cn("flex-1 py-2 text-xs font-medium transition-colors border-b-2",
               activeTab === tab ? "text-text-primary border-accent" : "text-text-muted border-transparent hover:text-text-primary")}>
-            {tab === "occurrences" ? "Occ." : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === "occurrences" ? "Occurrences" : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -1087,9 +1173,10 @@ function WordDetail({
       <div className="flex-1 overflow-y-auto p-4">
         {activeTab === "parsing" && (
           <ParsingTab surface={surface} strongs={strongs} morph={morph}
-            book={book} chapter={chapter} verse={verse} wordIdx={wordIdx} />
+            book={book} chapter={chapter} verse={verse} wordIdx={wordIdx}
+            onGrammarExample={onGrammarExample} />
         )}
-        {activeTab === "definition" && <DefinitionTab strongs={strongs} />}
+        {activeTab === "definition" && <DefinitionTab strongs={strongs} morph={morph} />}
         {activeTab === "occurrences" && (
           <OccurrencesTab strongs={strongs} textMode={textMode} onNavigate={onNavigateOccurrence} />
         )}
@@ -1099,9 +1186,24 @@ function WordDetail({
 }
 
 /* ── ParsingTab ─────────────────────────────────────────────── */
-function ParsingTab({ surface, strongs, morph, book, chapter, verse, wordIdx }: {
+const GRAMMAR_CLICKABLE: Record<string, Set<string>> = {
+  Tense: new Set(["Present","Imperfect","Aorist","2nd Aorist","Perfect","2nd Perfect","Pluperfect","Future"]),
+  Voice: new Set(["Active","Middle","Passive","Middle/Deponent","Middle-Passive","Middle or Passive","Middle Deponent"]),
+  Mood:  new Set(["Indicative","Subjunctive","Optative","Imperative","Infinitive","Participle"]),
+};
+
+function extractWordEnding(surface: string, lemma: string): { stem: string; ending: string } | null {
+  if (!surface || !lemma) return null;
+  let i = 0;
+  while (i < surface.length && i < lemma.length && surface[i] === lemma[i]) i++;
+  if (i === 0) return null;
+  return { stem: surface.slice(0, i), ending: surface.slice(i) };
+}
+
+function ParsingTab({ surface, strongs, morph, book, chapter, verse, wordIdx, onGrammarExample }: {
   surface: string; strongs: number; morph: string;
   book: string; chapter: string; verse: string; wordIdx: number;
+  onGrammarExample: (category: string, value: string) => void;
 }) {
   const rows: MorphRow[] = decodeMorph(morph);
   const lex = getLex(strongs);
@@ -1111,25 +1213,59 @@ function ParsingTab({ surface, strongs, morph, book, chapter, verse, wordIdx }: 
     return <p className="text-sm text-text-muted opacity-60">No parsing data for &ldquo;{morph}&rdquo;.</p>;
   }
 
+  /* Form hint: stem + bold ending */
+  let formHint: string | null = null;
+  const posRaw = morph.split("-")[0];
+  if (posRaw !== "V") {
+    const caseRow = rows.find(r => r.label === "Case");
+    if (caseRow) {
+      const numRow = rows.find(r => r.label === "Number");
+      const parsed = extractWordEnding(surface, lex.lemma || "");
+      const caseLabel = [caseRow.value, numRow?.value].filter(Boolean).join(" ");
+      formHint = parsed?.ending
+        ? `${parsed.stem}‑${parsed.ending} → ${caseLabel}`
+        : `${surface} → ${caseLabel}`;
+    }
+  }
+
   return (
     <div className="flex flex-col gap-0">
-      {rows.map((row, i) => (
-        <div key={i} className="flex items-start justify-between py-2 border-b border-border-subtle/50 last:border-0">
-          <span className="text-xs text-text-muted w-28 shrink-0">{row.label}</span>
-          <div className="text-right">
-            <span className="text-sm text-text-primary font-medium">{row.value}</span>
-            {row.desc && <p className="text-xs text-text-muted mt-0.5">{row.desc}</p>}
+      {rows.map((row, i) => {
+        const isClickable = GRAMMAR_CLICKABLE[row.label]?.has(row.value);
+        return (
+          <div key={i} className="flex items-start justify-between py-2 border-b border-border-subtle/50 last:border-0">
+            <span className="text-xs text-text-muted w-28 shrink-0">{row.label}</span>
+            <div className="text-right">
+              {isClickable ? (
+                <button
+                  onClick={() => onGrammarExample(row.label.toLowerCase(), row.value)}
+                  className="text-sm text-accent font-medium hover:text-accent-hover transition-colors underline decoration-dotted underline-offset-2"
+                  title={`See example of ${row.value}`}
+                >
+                  {row.value}
+                </button>
+              ) : (
+                <span className="text-sm text-text-primary font-medium">{row.value}</span>
+              )}
+              {row.desc && <p className="text-xs text-text-muted mt-0.5">{row.desc}</p>}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       {syntaxRole && (
         <div className="flex items-start justify-between py-2 border-b border-border-subtle/50">
           <span className="text-xs text-text-muted w-28 shrink-0">Syntax Role</span>
           <span className="text-sm text-text-primary font-medium text-right">{syntaxRole}</span>
         </div>
       )}
-      <div className="mt-4 pt-4 border-t border-border-subtle">
-        <p className="text-xs text-text-muted mb-1">Morph Code</p>
+      {formHint && (
+        <div className="mt-3 pt-3 border-t border-border-subtle/50">
+          <p className="text-[10px] text-text-muted uppercase tracking-widest mb-1">Form</p>
+          <p className="text-sm font-mono text-text-muted" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{formHint}</p>
+        </div>
+      )}
+      <div className="mt-3 pt-3 border-t border-border-subtle/50">
+        <p className="text-[10px] text-text-muted uppercase tracking-widest mb-1">Morph Code</p>
         <p className="text-xs font-mono text-text-muted opacity-60">{morph || "—"}</p>
       </div>
     </div>
@@ -1137,14 +1273,16 @@ function ParsingTab({ surface, strongs, morph, book, chapter, verse, wordIdx }: 
 }
 
 /* ── DefinitionTab ──────────────────────────────────────────── */
-function DefinitionTab({ strongs }: { strongs: number }) {
+function DefinitionTab({ strongs, morph }: { strongs: number; morph: string }) {
   const lex = getLex(strongs);
   if (!lex.lemma && !lex.brief) {
     return <p className="text-sm text-text-muted opacity-60">No definition found.</p>;
   }
 
+  const inflected = morph ? getWordGloss(lex, morph) : "";
   const quickRaw = lex.quick_def || lex.brief || "";
   const quickClean = quickRaw.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const quickDisplay = inflected || quickClean;
 
   const sections: { label: string; content: string }[] = [];
   if (lex.abbott_smith) sections.push({ label: "Abbott-Smith", content: lex.abbott_smith });
@@ -1152,21 +1290,26 @@ function DefinitionTab({ strongs }: { strongs: number }) {
   if (lex.extended || lex.brief) sections.push({ label: "Dodson", content: (lex.extended || lex.brief)! });
   if (lex.strongs_def) sections.push({
     label: "Strong's",
-    content: lex.strongs_def + (lex.kjv_def ? `<div style="opacity:.6;margin-top:4px;font-size:.8rem">Glosses: ${lex.kjv_def}</div>` : ""),
+    content: lex.strongs_def + (lex.kjv_def ? `<div style="opacity:.65;margin-top:6px;font-size:.78rem;font-style:italic">KJV glosses: ${lex.kjv_def}</div>` : ""),
   });
   if (lex.deriv) sections.push({ label: "Etymology", content: lex.deriv });
 
   return (
     <div className="flex flex-col gap-4">
-      {quickClean && (
-        <div className="p-2.5 bg-accent/5 border border-accent/20">
-          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">Quick Definition</p>
-          <p className="text-sm text-text-primary leading-relaxed">{quickClean}</p>
+      {quickDisplay && (
+        <div className="p-2.5 bg-accent/5 border-l-2 border-accent/50">
+          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">
+            {inflected ? "Inflected Gloss" : "Quick Definition"}
+          </p>
+          <p className="text-sm text-text-primary leading-relaxed italic">&ldquo;{quickDisplay}&rdquo;</p>
+          {inflected && quickClean && quickClean !== inflected && (
+            <p className="text-xs text-text-muted mt-1 not-italic">{quickClean}</p>
+          )}
         </div>
       )}
       {sections.map((s, i) => (
         <div key={i}>
-          <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1.5">{s.label}</p>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">{s.label}</p>
           <div className="text-sm text-text-primary leading-relaxed" dangerouslySetInnerHTML={{ __html: s.content }} />
           {i < sections.length - 1 && <div className="mt-4 border-b border-border-subtle/50" />}
         </div>
