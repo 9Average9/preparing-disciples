@@ -352,7 +352,22 @@ function getMorphFormLabel(morph: string): string {
   return posRow?.value || "";
 }
 
-/* ── Syntax tree: constants ─────────────────────────────────── */
+/* Find any morph code in NT text for a given strongs number — used when
+   opening a lexical entry from the library so the Parsing tab has data */
+function findAnyMorphForStrongs(strongs: number): string {
+  const text = getText("majority");
+  for (const book of NT_BOOK_ORDER) {
+    const bdata = text[book] || {};
+    for (const ch of Object.keys(bdata)) {
+      for (const v of Object.keys(bdata[ch])) {
+        for (const word of (bdata[ch][v] || [])) {
+          if (word[1] === strongs && word[2]) return word[2];
+        }
+      }
+    }
+  }
+  return "";
+}
 const SX_CLAUSE_TYPES: Record<number, string> = {
   2443:"purpose", 3704:"purpose",
   3754:"content", 5620:"result",
@@ -1275,7 +1290,8 @@ export default function RhemaPage() {
             setQuery={setLibraryQuery}
             loaded={loaded}
             onSelectLex={(strongs, lex) => {
-              setActiveWord([lex.lemma || "", strongs, ""]);
+              const morph = findAnyMorphForStrongs(strongs);
+              setActiveWord([lex.lemma || "", strongs, morph]);
               setActiveTab("definition");
               setShowLibrary(false);
             }}
