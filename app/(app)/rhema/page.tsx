@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ChevronLeft, ChevronRight, BookOpen, X, ChevronDown } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, ChevronDown, ArrowLeft, Copy, FileText, Link2, Save, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
   decodeMorph, type MorphRow,
 } from "./utils";
+import { db } from "@/lib/firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { useAuthContext } from "@/components/AuthProvider";
 
 /* ── Window type augmentation ───────────────────────────────── */
 declare global {
@@ -20,6 +23,9 @@ declare global {
     RhemaMM?: Record<string,Record<string,Record<string,Array<[string,number,string]>>>>;
     RhemaMSBBooks?: string[];
     RhemaBSBBooks?: string[];
+    RhemaCrossRefs?: Record<string, Record<string, string[]>>;
+    RhemaCrossRefLabels?: string[];
+    RhemaSyntax?: Record<string, Record<string, Record<string, Array<{ role?: string; head?: number }>>>> ;
   }
 }
 
@@ -48,6 +54,12 @@ const DATA_FILES = [
   "rhema-lexicon.js", "rhema-mm.js", "rhema-msb.js",
   "rhema-bsb.js", "rhema-syntax.js", "rhema-crossrefs.js",
 ];
+
+const CROSS_REF_LABELS: Record<string, string> = {
+  d: "Immediate Context", t: "Same Book", o: "Related",
+  n: "NT Connection", f: "OT Foundation", p: "Prophecy",
+  a: "Parallel", e: "Theme",
+};
 
 /* ── Data helpers ───────────────────────────────────────────── */
 function getBibleData() {
@@ -109,6 +121,12 @@ function getQuickDef(lex: LexEntry): string {
   return ans.length > 150 ? ans.slice(0, 147) + "..." : ans;
 }
 
+function getChipGloss(lex: LexEntry): string {
+  const src = lex.quick_def || lex.brief || "";
+  const plain = src.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  return plain.split(/[,;]/)[0].trim().slice(0, 40);
+}
+
 function getOccurrences(strongs: number, mode: TextMode): { total: number; books: Record<string, number> } {
   const text = getText(mode);
   const result: Record<string, number> = {};
@@ -126,8 +144,33 @@ function getOccurrences(strongs: number, mode: TextMode): { total: number; books
   return { total, books: result };
 }
 
+function getVariantSet(book: string, ch: string, v: string, mode: TextMode): Set<number> {
+  if (!NT_BOOK_ORDER.includes(book)) return new Set();
+  const majority = window.RhemaNT?.text[book]?.[ch]?.[v] || [];
+  const critical = window.RhemaCriticalNT?.text[book]?.[ch]?.[v] || [];
+  if (!majority.length && !critical.length) return new Set();
+  const current = mode === "majority" ? majority : critical;
+  const other = mode === "majority" ? critical : majority;
+  const out = new Set<number>();
+  for (let i = 0; i < current.length; i++) {
+    if (!other[i] || current[i][1] !== other[i][1]) out.add(i);
+  }
+  return out;
+}
+
+function parseCrossRefKey(ref: string): { book: string; ch: string; v: string } | null {
+  const [loc] = ref.split("|");
+  const spaceIdx = loc.lastIndexOf(" ");
+  if (spaceIdx < 0) return null;
+  const book = loc.slice(0, spaceIdx);
+  const [ch, v] = loc.slice(spaceIdx + 1).split(":");
+  if (!ch || !v) return null;
+  return { book, ch, v };
+}
+
 /* ── Main component ─────────────────────────────────────────── */
 export default function RhemaPage() {
+  const { user } = useAuthContext();
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [book, setBook] = useState("JOH");
@@ -146,34 +189,68 @@ export default function RhemaPage() {
   const [, forceUpdate] = useState(0);
   const loadingRef = useRef(false);
 
+  // Navigation history for breadcrumb trail
+  const [navHistory, setNavHistory] = useState<Array<{ book: string; chapter: string; verse: string }>>([]);
+
+  // Right panel state
+  const [showCrossRefs, setShowCrossRefs] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+
+  // Study notes
+  const [observations, setObservations] = useState("");
+  const [interpretations, setInterpretations] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
+
+  // Highlighter
+  const [highlights, setHighlights] = useState<Set<number>>(new Set());
+  const [copied, setCopied] = useState(false);
+
   /* Load data scripts */
   useEffect(() => {
     if (loadingRef.current) return;
     loadingRef.current = true;
-    let loaded = 0;
+    let count = 0;
     let failed = false;
     for (const file of DATA_FILES) {
       const s = document.createElement("script");
       s.src = `${STORAGE_BASE}${encodeURIComponent(file)}?alt=media`;
       s.onload = () => {
-        loaded++;
-        if (loaded === DATA_FILES.length) {
-          setLoaded(true);
-          forceUpdate(n => n + 1);
-        }
+        count++;
+        if (count === DATA_FILES.length) { setLoaded(true); forceUpdate(n => n + 1); }
       };
-      s.onerror = () => {
-        if (!failed) { failed = true; setLoadError(true); }
-      };
+      s.onerror = () => { if (!failed) { failed = true; setLoadError(true); } };
       document.head.appendChild(s);
     }
   }, []);
+
+  /* Load notes when passage changes */
+  useEffect(() => {
+    if (!loaded || !user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ref = doc(db, "rhema_notes", user.uid, "passages", `${book}_${chapter}_${verse}`);
+        const snap = await getDoc(ref);
+        if (cancelled) return;
+        if (snap.exists()) {
+          const data = snap.data();
+          setObservations(data.observations || "");
+          setInterpretations(data.interpretations || "");
+        } else {
+          setObservations("");
+          setInterpretations("");
+        }
+      } catch { /* ignore network/permission errors */ }
+    })();
+    return () => { cancelled = true; };
+  }, [loaded, user, book, chapter, verse]);
 
   /* Keyboard navigation */
   useEffect(() => {
     if (!loaded) return;
     function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === "ArrowRight") navigateVerse(1);
       if (e.key === "ArrowLeft")  navigateVerse(-1);
       if (e.key === "Escape") {
@@ -181,6 +258,8 @@ export default function RhemaPage() {
         setBookPickerOpen(false);
         setChPickerOpen(false);
         setVPickerOpen(false);
+        setShowCrossRefs(false);
+        setShowNotes(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -222,6 +301,7 @@ export default function RhemaPage() {
     const firstV = getVerses(code, firstCh, textMode)[0] || "1";
     setBook(code); setChapter(firstCh); setVerse(firstV);
     setActiveWord(null); setBookPickerOpen(false); setBookSearch("");
+    setNavHistory([]);
   }
 
   function selectChapter(ch: string) {
@@ -234,12 +314,59 @@ export default function RhemaPage() {
     setVerse(v); setActiveWord(null); setVPickerOpen(false);
   }
 
-  const words = loaded ? getWords(book, chapter, verse, textMode) : [];
-  const englishText = loaded ? getEnglishText(book, chapter, verse, textMode) : "";
+  function handleNavigateOccurrence(b: string, ch: string, v: string) {
+    setNavHistory(h => [...h, { book, chapter, verse }]);
+    setBook(b); setChapter(ch); setVerse(v);
+    setFullChapter(false); setActiveWord(null);
+  }
+
+  function handleBack() {
+    if (!navHistory.length) return;
+    const last = navHistory[navHistory.length - 1];
+    setNavHistory(h => h.slice(0, -1));
+    setBook(last.book); setChapter(last.chapter); setVerse(last.verse);
+    setActiveWord(null);
+  }
+
+  function copyVerse() {
+    const ws = getWords(book, chapter, verse, textMode);
+    const greek = ws.map(w => w[0]).join(" ");
+    const english = getEnglishText(book, chapter, verse, textMode);
+    const text = `${BOOK_NAMES[book] || book} ${chapter}:${verse}\n${greek}${english ? "\n" + english : ""}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  async function saveNotes() {
+    if (!user) return;
+    setNoteSaving(true);
+    try {
+      const ref = doc(db, "rhema_notes", user.uid, "passages", `${book}_${chapter}_${verse}`);
+      await setDoc(ref, { observations, interpretations, updatedAt: new Date() });
+      setNoteSaved(true);
+      setTimeout(() => setNoteSaved(false), 2000);
+    } catch { /* ignore */ }
+    setNoteSaving(false);
+  }
+
+  function toggleHighlight(strongs: number) {
+    setHighlights(h => {
+      const next = new Set(h);
+      if (next.has(strongs)) next.delete(strongs); else next.add(strongs);
+      return next;
+    });
+  }
+
   const allBooks = loaded ? getBookOrder(textMode) : [];
   const chapters = loaded ? getChapters(book, textMode) : [];
   const verses = loaded ? getVerses(book, chapter, textMode) : [];
   const bookName = BOOK_NAMES[book] || book;
+  const englishText = loaded ? getEnglishText(book, chapter, verse, textMode) : "";
+  const variantSet = loaded ? getVariantSet(book, chapter, verse, textMode) : new Set<number>();
+  const crossRefs = loaded ? (window.RhemaCrossRefs?.[`${book} ${chapter}:${verse}`] || null) : null;
+  const hasCrossRefs = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
 
   const filteredBooks = allBooks.filter(c =>
     (BOOK_NAMES[c] || c).toLowerCase().includes(bookSearch.toLowerCase())
@@ -273,7 +400,6 @@ export default function RhemaPage() {
     <div className="flex h-full flex-col bg-bg-base">
       {/* ── Top bar ── */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle bg-bg-surface shrink-0 flex-wrap">
-        {/* Logo */}
         <div className="flex items-center gap-2 mr-2">
           <div className="h-7 w-7 bg-accent/10 border border-accent/30 flex items-center justify-center shrink-0">
             <span className="font-serif text-base text-accent leading-none">Ρ</span>
@@ -281,7 +407,6 @@ export default function RhemaPage() {
           <span className="text-sm font-semibold text-text-primary hidden sm:block">Rhema</span>
         </div>
 
-        {/* Book picker */}
         <button
           onClick={() => { setBookPickerOpen(true); setChPickerOpen(false); setVPickerOpen(false); }}
           className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary font-medium transition-colors"
@@ -290,7 +415,6 @@ export default function RhemaPage() {
           <ChevronDown className="h-3 w-3 text-text-muted" />
         </button>
 
-        {/* Chapter picker */}
         <button
           onClick={() => { setChPickerOpen(true); setBookPickerOpen(false); setVPickerOpen(false); }}
           className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors"
@@ -299,7 +423,6 @@ export default function RhemaPage() {
           <ChevronDown className="h-3 w-3 text-text-muted" />
         </button>
 
-        {/* Verse picker */}
         {!fullChapter && (
           <button
             onClick={() => { setVPickerOpen(true); setBookPickerOpen(false); setChPickerOpen(false); }}
@@ -310,7 +433,6 @@ export default function RhemaPage() {
           </button>
         )}
 
-        {/* Nav arrows */}
         {!fullChapter && (
           <div className="flex items-center gap-1">
             <button onClick={() => navigateVerse(-1)} className="h-8 w-8 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors">
@@ -322,8 +444,56 @@ export default function RhemaPage() {
           </div>
         )}
 
-        {/* Toggles */}
         <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {/* Copy verse */}
+          <button
+            onClick={copyVerse}
+            title="Copy verse"
+            className={cn(
+              "h-7 w-7 flex items-center justify-center border transition-colors",
+              copied
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+            )}
+          >
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+
+          {/* Cross references */}
+          <button
+            onClick={() => { setShowCrossRefs(v => !v); setShowNotes(false); setActiveWord(null); }}
+            title="Cross references"
+            className={cn(
+              "h-7 px-2.5 flex items-center gap-1.5 text-xs border transition-colors",
+              showCrossRefs
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+            )}
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Refs</span>
+            {hasCrossRefs && !showCrossRefs && (
+              <span className="h-1.5 w-1.5 rounded-full bg-accent shrink-0" />
+            )}
+          </button>
+
+          {/* Study notes */}
+          <button
+            onClick={() => { setShowNotes(v => !v); setShowCrossRefs(false); setActiveWord(null); }}
+            title="Study notes"
+            className={cn(
+              "h-7 px-2.5 flex items-center gap-1.5 text-xs border transition-colors",
+              showNotes
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+            )}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Notes</span>
+          </button>
+
+          <div className="w-px h-4 bg-border-subtle mx-0.5" />
+
           <ToggleBtn active={fullChapter} onClick={() => setFullChapter(v => !v)} label="Chapter" />
           <ToggleBtn active={greekOnly} onClick={() => setGreekOnly(v => !v)} label="Greek Only" />
           {!greekOnly && <ToggleBtn active={showEnglish} onClick={() => setShowEnglish(v => !v)} label="English" />}
@@ -335,42 +505,82 @@ export default function RhemaPage() {
         </div>
       </div>
 
+      {/* ── Breadcrumb trail ── */}
+      {navHistory.length > 0 && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border-subtle/50 bg-bg-surface/50 shrink-0">
+          <button
+            onClick={handleBack}
+            className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover transition-colors font-medium"
+          >
+            <ArrowLeft className="h-3 w-3" />
+            Back to {BOOK_NAMES[navHistory[navHistory.length - 1].book] || navHistory[navHistory.length - 1].book}{" "}
+            {navHistory[navHistory.length - 1].chapter}:{navHistory[navHistory.length - 1].verse}
+          </button>
+          {navHistory.length > 1 && (
+            <span className="text-xs text-text-muted opacity-50">+{navHistory.length - 1} more</span>
+          )}
+          <button
+            onClick={() => setNavHistory([])}
+            className="ml-auto text-xs text-text-muted hover:text-text-primary transition-colors opacity-60 hover:opacity-100"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* ── Body ── */}
       <div className="flex flex-1 min-h-0">
-        {/* Center: Greek text */}
         <div className="flex-1 overflow-y-auto p-6 min-w-0">
           {fullChapter ? (
             <ChapterView
               book={book} chapter={chapter} verse={verse}
               textMode={textMode} greekOnly={greekOnly} showEnglish={showEnglish}
-              activeWord={activeWord}
-              onWordClick={(w) => { setActiveWord(w); setActiveTab("parsing"); }}
+              activeWord={activeWord} highlights={highlights}
+              onWordClick={(w) => { setActiveWord(w); setActiveTab("parsing"); setShowCrossRefs(false); setShowNotes(false); }}
+              onHighlightToggle={toggleHighlight}
               englishLabel={getEnglishLabel(textMode)}
             />
           ) : (
             <VerseView
               book={book} chapter={chapter} verse={verse}
               textMode={textMode} greekOnly={greekOnly} showEnglish={showEnglish}
-              activeWord={activeWord}
-              onWordClick={(w) => { setActiveWord(w); setActiveTab("parsing"); }}
+              activeWord={activeWord} highlights={highlights} variantSet={variantSet}
+              onWordClick={(w) => { setActiveWord(w); setActiveTab("parsing"); setShowCrossRefs(false); setShowNotes(false); }}
+              onHighlightToggle={toggleHighlight}
               englishText={englishText}
               englishLabel={getEnglishLabel(textMode)}
             />
           )}
         </div>
 
-        {/* Right: Word detail */}
-        {activeWord && (
+        {/* Right panel */}
+        {activeWord && !showCrossRefs && !showNotes && (
           <WordDetail
             word={activeWord}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             textMode={textMode}
+            book={book} chapter={chapter} verse={verse}
             onClose={() => setActiveWord(null)}
-            onNavigateOccurrence={(b, ch, v) => {
-              setBook(b); setChapter(ch); setVerse(v);
-              setFullChapter(false); setActiveWord(null);
-            }}
+            onNavigateOccurrence={handleNavigateOccurrence}
+          />
+        )}
+        {showCrossRefs && (
+          <CrossRefsPanel
+            book={book} chapter={chapter} verse={verse}
+            crossRefs={crossRefs}
+            onClose={() => setShowCrossRefs(false)}
+            onNavigate={(b, ch, v) => { handleNavigateOccurrence(b, ch, v); setShowCrossRefs(false); }}
+          />
+        )}
+        {showNotes && (
+          <StudyNotesPanel
+            book={book} chapter={chapter} verse={verse}
+            observations={observations} setObservations={setObservations}
+            interpretations={interpretations} setInterpretations={setInterpretations}
+            noteSaving={noteSaving} noteSaved={noteSaved}
+            onSave={saveNotes}
+            onClose={() => setShowNotes(false)}
           />
         )}
       </div>
@@ -474,11 +684,14 @@ export default function RhemaPage() {
 /* ── VerseView ──────────────────────────────────────────────── */
 function VerseView({
   book, chapter, verse, textMode, greekOnly, showEnglish,
-  activeWord, onWordClick, englishText, englishLabel,
+  activeWord, highlights, variantSet, onWordClick, onHighlightToggle, englishText, englishLabel,
 }: {
   book: string; chapter: string; verse: string; textMode: TextMode;
   greekOnly: boolean; showEnglish: boolean; activeWord: Word | null;
-  onWordClick: (w: Word) => void; englishText: string; englishLabel: string;
+  highlights: Set<number>; variantSet: Set<number>;
+  onWordClick: (w: Word) => void;
+  onHighlightToggle: (strongs: number) => void;
+  englishText: string; englishLabel: string;
 }) {
   const words = getWords(book, chapter, verse, textMode);
   const ref = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
@@ -490,7 +703,10 @@ function VerseView({
           <WordChip
             key={i} word={w} greekOnly={greekOnly}
             active={activeWord?.[0] === w[0] && activeWord?.[1] === w[1]}
+            isVariant={variantSet.has(i)}
+            isHighlighted={highlights.has(w[1])}
             onClick={() => onWordClick(w)}
+            onDoubleClick={() => onHighlightToggle(w[1])}
           />
         ))}
       </div>
@@ -511,11 +727,14 @@ function VerseView({
 /* ── ChapterView ────────────────────────────────────────────── */
 function ChapterView({
   book, chapter, verse: targetVerse, textMode, greekOnly, showEnglish,
-  activeWord, onWordClick, englishLabel,
+  activeWord, highlights, onWordClick, onHighlightToggle, englishLabel,
 }: {
   book: string; chapter: string; verse: string; textMode: TextMode;
   greekOnly: boolean; showEnglish: boolean; activeWord: Word | null;
-  onWordClick: (w: Word) => void; englishLabel: string;
+  highlights: Set<number>;
+  onWordClick: (w: Word) => void;
+  onHighlightToggle: (strongs: number) => void;
+  englishLabel: string;
 }) {
   const verses = getVerses(book, chapter, textMode);
   const bookName = BOOK_NAMES[book] || book;
@@ -528,6 +747,7 @@ function ChapterView({
         const words = getWords(book, chapter, v, textMode);
         const engText = getEnglishText(book, chapter, v, textMode);
         const isTarget = v === targetVerse;
+        const variantSet = getVariantSet(book, chapter, v, textMode);
         return (
           <div key={v} className={cn("mb-8 pb-6 border-b border-border-subtle/50", isTarget && "bg-accent/3 -mx-2 px-2 rounded")}>
             <span className="text-xs font-bold text-accent mr-2 select-none">{v}</span>
@@ -536,7 +756,10 @@ function ChapterView({
                 <WordChip
                   key={i} word={w} greekOnly={greekOnly}
                   active={activeWord?.[0] === w[0] && activeWord?.[1] === w[1]}
+                  isVariant={variantSet.has(i)}
+                  isHighlighted={highlights.has(w[1])}
                   onClick={() => onWordClick(w)}
+                  onDoubleClick={() => onHighlightToggle(w[1])}
                 />
               ))}
             </div>
@@ -555,28 +778,39 @@ function ChapterView({
 
 /* ── WordChip ───────────────────────────────────────────────── */
 function WordChip({
-  word, greekOnly, active, onClick,
+  word, greekOnly, active, isVariant, isHighlighted, onClick, onDoubleClick,
 }: {
-  word: Word; greekOnly: boolean; active: boolean; onClick: () => void;
+  word: Word; greekOnly: boolean; active: boolean;
+  isVariant: boolean; isHighlighted: boolean;
+  onClick: () => void; onDoubleClick: () => void;
 }) {
   const [surface, strongs] = word;
   const lex = getLex(strongs);
-  const gloss = lex.brief ? lex.brief.split(",")[0].split(";")[0].trim() : "";
+  const gloss = getChipGloss(lex);
 
   return (
     <button
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       className={cn(
-        "flex flex-col items-center gap-0.5 px-1.5 py-1 border transition-colors duration-100 group",
+        "relative flex flex-col items-center gap-0.5 px-1.5 py-1 border transition-colors duration-100 group",
         active
           ? "border-accent bg-accent/10"
+          : isHighlighted
+          ? "border-yellow-600/40 bg-yellow-500/10 hover:border-yellow-600/60"
           : "border-transparent hover:border-border-subtle hover:bg-bg-elevated"
       )}
     >
+      {isVariant && (
+        <span
+          className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-orange-400/90 ring-1 ring-bg-base"
+          title="Text variant between majority and critical"
+        />
+      )}
       <span
         className={cn(
           "text-xl leading-tight select-none",
-          active ? "text-accent" : "text-text-primary group-hover:text-accent"
+          active ? "text-accent" : isHighlighted ? "text-yellow-400" : "text-text-primary group-hover:text-accent"
         )}
         style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
       >
@@ -593,19 +827,21 @@ function WordChip({
 
 /* ── WordDetail panel ───────────────────────────────────────── */
 function WordDetail({
-  word, activeTab, setActiveTab, textMode, onClose, onNavigateOccurrence,
+  word, activeTab, setActiveTab, textMode, book, chapter, verse, onClose, onNavigateOccurrence,
 }: {
   word: Word; activeTab: ActiveTab; setActiveTab: (t: ActiveTab) => void;
-  textMode: TextMode; onClose: () => void;
+  textMode: TextMode; book: string; chapter: string; verse: string;
+  onClose: () => void;
   onNavigateOccurrence: (book: string, ch: string, v: string) => void;
 }) {
   const [surface, strongs, morph] = word;
   const lex = getLex(strongs);
   const quick = getQuickDef(lex);
+  const words = getWords(book, chapter, verse, textMode);
+  const wordIdx = words.findIndex(w => w[0] === surface && w[1] === strongs && w[2] === morph);
 
   return (
     <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
-      {/* Header */}
       <div className="px-4 py-4 border-b border-border-subtle flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-2xl text-text-primary leading-none mb-1"
@@ -630,7 +866,6 @@ function WordDetail({
         </button>
       </div>
 
-      {/* Tabs */}
       <div className="flex border-b border-border-subtle">
         {(["parsing","definition","occurrences"] as ActiveTab[]).map(tab => (
           <button
@@ -648,9 +883,11 @@ function WordDetail({
         ))}
       </div>
 
-      {/* Tab content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {activeTab === "parsing" && <ParsingTab surface={surface} strongs={strongs} morph={morph} />}
+        {activeTab === "parsing" && (
+          <ParsingTab surface={surface} strongs={strongs} morph={morph}
+            book={book} chapter={chapter} verse={verse} wordIdx={wordIdx} />
+        )}
         {activeTab === "definition" && <DefinitionTab strongs={strongs} />}
         {activeTab === "occurrences" && (
           <OccurrencesTab strongs={strongs} textMode={textMode} onNavigate={onNavigateOccurrence} />
@@ -661,12 +898,17 @@ function WordDetail({
 }
 
 /* ── ParsingTab ─────────────────────────────────────────────── */
-function ParsingTab({ surface, strongs, morph }: { surface: string; strongs: number; morph: string }) {
+function ParsingTab({ surface, strongs, morph, book, chapter, verse, wordIdx }: {
+  surface: string; strongs: number; morph: string;
+  book: string; chapter: string; verse: string; wordIdx: number;
+}) {
   const rows: MorphRow[] = decodeMorph(morph);
   const lex = getLex(strongs);
+  const syntaxEntry = window.RhemaSyntax?.[book]?.[chapter]?.[verse]?.[wordIdx];
+  const syntaxRole = syntaxEntry?.role;
 
   if (!rows.length) {
-    return <p className="text-sm text-text-muted opacity-60">No parsing data for "{morph}".</p>;
+    return <p className="text-sm text-text-muted opacity-60">No parsing data for &ldquo;{morph}&rdquo;.</p>;
   }
 
   return (
@@ -680,12 +922,16 @@ function ParsingTab({ surface, strongs, morph }: { surface: string; strongs: num
           </div>
         </div>
       ))}
-      {lex.lemma && (
-        <div className="mt-4 pt-4 border-t border-border-subtle">
-          <p className="text-xs text-text-muted mb-1">Morph Code</p>
-          <p className="text-xs font-mono text-text-muted opacity-60">{morph}</p>
+      {syntaxRole && (
+        <div className="flex items-start justify-between py-2 border-b border-border-subtle/50">
+          <span className="text-xs text-text-muted w-28 shrink-0">Syntax Role</span>
+          <span className="text-sm text-text-primary font-medium text-right">{syntaxRole}</span>
         </div>
       )}
+      <div className="mt-4 pt-4 border-t border-border-subtle">
+        <p className="text-xs text-text-muted mb-1">Morph Code</p>
+        <p className="text-xs font-mono text-text-muted opacity-60">{morph}</p>
+      </div>
     </div>
   );
 }
@@ -697,8 +943,10 @@ function DefinitionTab({ strongs }: { strongs: number }) {
     return <p className="text-sm text-text-muted opacity-60">No definition found.</p>;
   }
 
-  const sections: { label: string; content: string }[] = [];
+  const quickRaw = lex.quick_def || lex.brief || "";
+  const quickClean = quickRaw.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
+  const sections: { label: string; content: string }[] = [];
   if (lex.abbott_smith) sections.push({ label: "Abbott-Smith", content: lex.abbott_smith });
   if (lex.moulton_milligan) sections.push({ label: "Moulton-Milligan", content: lex.moulton_milligan });
   if (lex.extended || lex.brief) sections.push({ label: "Dodson", content: (lex.extended || lex.brief)! });
@@ -710,6 +958,12 @@ function DefinitionTab({ strongs }: { strongs: number }) {
 
   return (
     <div className="flex flex-col gap-4">
+      {quickClean && (
+        <div className="p-2.5 bg-accent/5 border border-accent/20 rounded-sm">
+          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">Quick Definition</p>
+          <p className="text-sm text-text-primary leading-relaxed">{quickClean}</p>
+        </div>
+      )}
       {sections.map((s, i) => (
         <div key={i}>
           <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1.5">{s.label}</p>
@@ -814,12 +1068,137 @@ function BookOccurrences({
   );
 }
 
-/* ── PickerOverlay ──────────────────────────────────────────── */
-function PickerOverlay({
-  children, onClose,
+/* ── CrossRefsPanel ─────────────────────────────────────────── */
+function CrossRefsPanel({
+  book, chapter, verse, crossRefs, onClose, onNavigate,
 }: {
-  children: React.ReactNode; onClose: () => void;
+  book: string; chapter: string; verse: string;
+  crossRefs: Record<string, string[]> | null;
+  onClose: () => void;
+  onNavigate: (book: string, ch: string, v: string) => void;
 }) {
+  const ref = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+  const labels = window.RhemaCrossRefLabels || [];
+
+  return (
+    <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+      <div className="px-4 py-4 border-b border-border-subtle flex items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-text-primary">Cross References</p>
+          <p className="text-xs text-text-muted mt-0.5">{ref}</p>
+        </div>
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary shrink-0">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        {!crossRefs || !Object.values(crossRefs).some(a => a?.length > 0) ? (
+          <p className="text-sm text-text-muted opacity-60">No cross references for this verse.</p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {Object.entries(crossRefs).map(([key, refs], ci) => {
+              if (!refs?.length) return null;
+              const label = labels[ci] || CROSS_REF_LABELS[key] || key.toUpperCase();
+              return (
+                <div key={key}>
+                  <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1.5">{label}</p>
+                  <div className="flex flex-col gap-0.5">
+                    {refs.map((r, i) => {
+                      const parsed = parseCrossRefKey(r);
+                      if (!parsed) return null;
+                      const display = `${BOOK_NAMES[parsed.book] || parsed.book} ${parsed.ch}:${parsed.v}`;
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => onNavigate(parsed.book, parsed.ch, parsed.v)}
+                          className="w-full text-left px-2 py-1.5 text-xs text-text-muted hover:text-accent hover:bg-bg-elevated transition-colors"
+                        >
+                          {display}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── StudyNotesPanel ────────────────────────────────────────── */
+function StudyNotesPanel({
+  book, chapter, verse,
+  observations, setObservations,
+  interpretations, setInterpretations,
+  noteSaving, noteSaved, onSave, onClose,
+}: {
+  book: string; chapter: string; verse: string;
+  observations: string; setObservations: (v: string) => void;
+  interpretations: string; setInterpretations: (v: string) => void;
+  noteSaving: boolean; noteSaved: boolean;
+  onSave: () => void; onClose: () => void;
+}) {
+  const ref = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+  return (
+    <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+      <div className="px-4 py-4 border-b border-border-subtle flex items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-text-primary">Study Notes</p>
+          <p className="text-xs text-text-muted mt-0.5">{ref}</p>
+        </div>
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary shrink-0">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest">Observations</p>
+          <textarea
+            value={observations}
+            onChange={e => setObservations(e.target.value)}
+            placeholder="What does the text say? Note grammatical, structural, and literary observations…"
+            className="w-full min-h-[120px] bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest">Interpretations</p>
+          <textarea
+            value={interpretations}
+            onChange={e => setInterpretations(e.target.value)}
+            placeholder="What does the text mean? Theological significance, cross-reference connections…"
+            className="w-full min-h-[120px] bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
+          />
+        </div>
+      </div>
+      <div className="p-4 border-t border-border-subtle">
+        <button
+          onClick={onSave}
+          disabled={noteSaving}
+          className={cn(
+            "w-full h-8 flex items-center justify-center gap-2 text-xs font-medium border transition-colors disabled:opacity-60",
+            noteSaved
+              ? "border-accent text-accent bg-accent/5"
+              : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+          )}
+        >
+          {noteSaved ? (
+            <><Check className="h-3.5 w-3.5" /> Saved</>
+          ) : noteSaving ? (
+            <><div className="h-3.5 w-3.5 border border-current border-t-transparent rounded-full animate-spin" /> Saving…</>
+          ) : (
+            <><Save className="h-3.5 w-3.5" /> Save Notes</>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── PickerOverlay ──────────────────────────────────────────── */
+function PickerOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div
       className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-16"
