@@ -16,19 +16,19 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-accent text-bg-base font-semibold hover:bg-accent-hover border border-transparent",
+    "bg-accent text-bg-base font-semibold hover:bg-accent-hover shadow-sm hover:shadow-md hover:scale-[1.02] active:scale-[0.98]",
   secondary:
-    "bg-bg-elevated text-text-primary border border-border-subtle hover:bg-[#252b3b] hover:border-[#3a4052]",
+    "bg-bg-elevated text-text-primary border border-border-subtle hover:bg-bg-base hover:border-text-muted/30 shadow-sm hover:shadow",
   ghost:
     "bg-transparent text-text-muted border border-transparent hover:bg-bg-elevated hover:text-text-primary",
   danger:
-    "bg-danger/10 text-danger border border-danger/30 hover:bg-danger/20 hover:border-danger/50",
+    "bg-danger/10 text-danger border border-danger/25 hover:bg-danger/15 hover:border-danger/40",
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: "h-7 px-3 text-xs gap-1.5",
-  md: "h-9 px-4 text-sm gap-2",
-  lg: "h-11 px-6 text-base gap-2.5",
+  sm: "h-8 px-3.5 text-xs gap-1.5 rounded-lg",
+  md: "h-10 px-5 text-sm gap-2 rounded-xl",
+  lg: "h-12 px-7 text-base gap-2.5 rounded-xl",
 };
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -52,8 +52,8 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled || loading}
         className={cn(
-          "inline-flex items-center justify-center font-medium transition-colors duration-150 cursor-pointer select-none",
-          "disabled:opacity-50 disabled:cursor-not-allowed",
+          "inline-flex items-center justify-center font-medium transition-all duration-200 cursor-pointer select-none",
+          "disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none",
           variantStyles[variant],
           sizeStyles[size],
           className

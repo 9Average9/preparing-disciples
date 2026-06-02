@@ -40,17 +40,26 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg-base flex items-center justify-center">
+    <div
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ backgroundColor: "var(--bg-base)" }}
+    >
       <div className="w-full max-w-sm">
         {/* Logo */}
-        <div className="mb-10 text-center">
-          <div className="inline-flex items-center gap-3 mb-6">
-            <div className="h-8 w-8 flex items-center justify-center bg-accent/10 border border-accent/30">
+        <div className="mb-8 text-center">
+          <Link href="/" className="inline-flex items-center gap-3 mb-6">
+            <div
+              className="h-10 w-10 flex items-center justify-center rounded-xl"
+              style={{
+                backgroundColor: "rgba(184,144,63,0.12)",
+                border: "1px solid rgba(184,144,63,0.22)",
+              }}
+            >
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
                 className="h-5 w-5"
-                stroke="#c9a84c"
+                stroke="var(--accent)"
                 strokeWidth="1.5"
               >
                 <path d="M12 3v18M7 8h10" strokeLinecap="round" />
@@ -58,74 +67,94 @@ export default function SignupPage() {
                 <path d="M13 14h6v5h-6z" strokeLinecap="square" />
               </svg>
             </div>
-            <span className="text-base font-semibold text-text-primary">
+            <span
+              className="text-base font-bold tracking-tight"
+              style={{ color: "var(--text-primary)" }}
+            >
               Preparing Disciples
             </span>
-          </div>
-          <h1 className="text-2xl font-bold text-text-primary">
+          </Link>
+          <h1
+            className="text-2xl font-bold mb-1"
+            style={{ color: "var(--text-primary)" }}
+          >
             Create your account
           </h1>
-          <p className="text-sm text-text-muted mt-1">
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
             Start preparing sermons with confidence
           </p>
         </div>
 
-        {/* Form */}
-        <form
-          onSubmit={handleSubmit}
-          className="bg-bg-surface border border-border-subtle p-8 flex flex-col gap-5"
+        {/* Card */}
+        <div
+          className="rounded-2xl p-8 flex flex-col gap-5"
+          style={{
+            backgroundColor: "var(--bg-surface)",
+            border: "1px solid var(--border-subtle)",
+            boxShadow: "var(--shadow-lg)",
+          }}
         >
-          <Input
-            label="Full name"
-            type="text"
-            placeholder="Pastor John Smith"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoComplete="name"
-            required
-          />
-          <Input
-            label="Email address"
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            required
-          />
-          <Input
-            label="Password"
-            type="password"
-            placeholder="At least 8 characters"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-            hint="Minimum 8 characters"
-            required
-          />
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <Input
+              label="Full name"
+              type="text"
+              placeholder="Pastor John Smith"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoComplete="name"
+              required
+            />
+            <Input
+              label="Email address"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+            <Input
+              label="Password"
+              type="password"
+              placeholder="At least 8 characters"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              hint="Minimum 8 characters"
+              required
+            />
 
-          {error && (
-            <p className="text-sm text-danger bg-danger/5 border border-danger/20 px-3 py-2">
-              {error}
-            </p>
-          )}
+            {error && (
+              <div
+                className="px-3.5 py-2.5 rounded-xl text-sm"
+                style={{
+                  color: "var(--danger)",
+                  backgroundColor: "rgba(192,57,43,0.06)",
+                  border: "1px solid rgba(192,57,43,0.18)",
+                }}
+              >
+                {error}
+              </div>
+            )}
 
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            loading={loading}
-            className="w-full mt-1"
-          >
-            Create Account
-          </Button>
-        </form>
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              loading={loading}
+              className="w-full mt-1"
+            >
+              Create Account
+            </Button>
+          </form>
+        </div>
 
-        <p className="text-center text-sm text-text-muted mt-5">
+        <p className="text-center text-sm mt-5" style={{ color: "var(--text-muted)" }}>
           Already have an account?{" "}
           <Link
             href="/login"
-            className="text-accent hover:text-accent-hover font-medium transition-colors"
+            className="font-semibold transition-colors"
+            style={{ color: "var(--accent)" }}
           >
             Sign in
           </Link>
@@ -138,7 +167,8 @@ export default function SignupPage() {
 function friendlyError(message: string): string {
   if (message.includes("email-already-in-use"))
     return "An account with this email already exists.";
-  if (message.includes("invalid-email")) return "Please enter a valid email address.";
+  if (message.includes("invalid-email"))
+    return "Please enter a valid email address.";
   if (message.includes("weak-password"))
     return "Password is too weak. Please choose a stronger password.";
   return "Something went wrong. Please try again.";

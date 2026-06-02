@@ -12,7 +12,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import type { Sermon, SermonOutline } from "@/types";
+import type { Sermon, SermonOutline, Slide, SlideTheme } from "@/types";
 
 const COLLECTION = "sermons";
 
@@ -28,6 +28,7 @@ function sermonFromFirestore(
     updatedAt: (data.updatedAt as Timestamp).toDate(),
     status: data.status as Sermon["status"],
     outline: data.outline as SermonOutline,
+    presentation: data.presentation as Sermon["presentation"] | undefined,
   };
 }
 
@@ -75,6 +76,17 @@ export async function updateSermon(
 
 export async function deleteSermon(id: string): Promise<void> {
   await deleteDoc(doc(db, COLLECTION, id));
+}
+
+export async function savePresentation(
+  sermonId: string,
+  slides: Slide[],
+  theme: SlideTheme
+): Promise<void> {
+  await updateDoc(doc(db, COLLECTION, sermonId), {
+    presentation: { slides, theme },
+    updatedAt: Timestamp.now(),
+  });
 }
 
 export async function getUserSermons(userId: string): Promise<Sermon[]> {
