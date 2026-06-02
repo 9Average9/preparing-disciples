@@ -19,56 +19,73 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Sermon, Slide, SlideTheme, SlideType, GrammarChange } from "@/types";
 
-/* ── Theme definitions ─────────────────────────────────── */
-const THEMES: SlideTheme[] = [
+/* ── Vibe definitions ─────────────────────────────────── */
+const VIBES = [
   {
-    id: "heritage",
-    name: "Heritage",
-    description: "Dark wood tones, serif typography",
-    preview: "bg-[#2c1810]",
-    style: { bg: "#2c1810", text: "#f5e6c8", accent: "#c9a84c", font: "serif" },
+    id: "sacred-classic",
+    name: "Sacred & Classic",
+    tagline: "Reverent, timeless",
+    colors: ["#2c1a0e", "#c9a84c", "#f5e6c8"],
+    guide: "Rich walnut background. Gold accent. Warm cream text. Serif fonts. Traditional and ornate.",
   },
   {
-    id: "modern-light",
-    name: "Modern Light",
-    description: "Clean white, minimal",
-    preview: "bg-white",
-    style: { bg: "#ffffff", text: "#1a1a2e", accent: "#3b82f6", font: "sans" },
+    id: "bold-powerful",
+    name: "Bold & Powerful",
+    tagline: "High-impact, commanding",
+    colors: ["#0a0a0a", "#dc2626", "#ffffff"],
+    guide: "Near-black background. Bold crimson accent. Pure white text. Sans-serif. Strong and authoritative.",
   },
   {
-    id: "scripture",
-    name: "Scripture",
-    description: "Parchment & cream, classic",
-    preview: "bg-[#f5e6c8]",
-    style: {
-      bg: "#f5e6c8",
-      text: "#3d2b1f",
-      accent: "#8b5e3c",
-      font: "serif",
-    },
+    id: "warm-inviting",
+    name: "Warm & Inviting",
+    tagline: "Welcoming, pastoral",
+    colors: ["#fdf7f0", "#c17d3f", "#3d2b1f"],
+    guide: "Warm ivory background. Amber accent. Deep brown text. Friendly and approachable.",
   },
   {
-    id: "bold",
-    name: "Bold",
-    description: "High contrast, gold accents",
-    preview: "bg-black",
-    style: { bg: "#000000", text: "#ffffff", accent: "#c9a84c", font: "sans" },
+    id: "hope-renewal",
+    name: "Hope & Renewal",
+    tagline: "Fresh, uplifting",
+    colors: ["#f0f7f4", "#2e8b57", "#1a3d2e"],
+    guide: "Soft sage-white background. Forest green accent. Deep green text. Fresh and life-giving.",
   },
   {
-    id: "natural",
-    name: "Natural",
-    description: "Earthy greens and browns",
-    preview: "bg-[#2d3b2b]",
-    style: { bg: "#2d3b2b", text: "#d4e8c8", accent: "#8bc34a", font: "sans" },
+    id: "midnight-glory",
+    name: "Midnight Glory",
+    tagline: "Mysterious, worshipful",
+    colors: ["#0a0d18", "#6b7fe8", "#e8eaf6"],
+    guide: "Deep midnight navy background. Soft indigo accent. Light blue-white text. Atmospheric and contemplative.",
   },
   {
-    id: "night",
-    name: "Night",
-    description: "Deep navy, soft light text",
-    preview: "bg-[#0d1b2e]",
-    style: { bg: "#0d1b2e", text: "#e8eaf6", accent: "#7986cb", font: "sans" },
+    id: "sunrise-praise",
+    name: "Sunrise & Praise",
+    tagline: "Joyful, celebratory",
+    colors: ["#fff8f0", "#e87c2e", "#2d1a0e"],
+    guide: "Warm white background. Vibrant orange accent. Dark espresso text. Energetic and celebratory.",
+  },
+  {
+    id: "regal-anointed",
+    name: "Regal & Anointed",
+    tagline: "Majestic, prophetic",
+    colors: ["#100c1e", "#9b7fe8", "#f0ebff"],
+    guide: "Deep purple-black background. Royal purple accent. Soft lavender-white text. Majestic and anointed.",
+  },
+  {
+    id: "simple-truth",
+    name: "Simple Truth",
+    tagline: "Clean, focused",
+    colors: ["#ffffff", "#3b82f6", "#1a1a2e"],
+    guide: "Clean white background. Sky-blue accent. Near-black text. Minimal and clear. Sans-serif.",
   },
 ];
+
+const DEFAULT_THEME: SlideTheme = {
+  id: "default",
+  name: "Default",
+  description: "",
+  preview: "",
+  style: { bg: "#1a1612", text: "#f0ece4", accent: "#c9a84c", font: "serif" },
+};
 
 /* ── Default slide set ─────────────────────────────────── */
 function buildDefaultSlides(sermon: Sermon): Slide[] {
@@ -133,7 +150,8 @@ export default function SlidesPage() {
   const [sermon, setSermon] = useState<Sermon | null>(null);
   const [loading, setLoading] = useState(true);
   const [slides, setSlides] = useState<Slide[]>([]);
-  const [activeTheme, setActiveTheme] = useState<SlideTheme>(THEMES[0]);
+  const [activeTheme, setActiveTheme] = useState<SlideTheme>(DEFAULT_THEME);
+  const [selectedVibe, setSelectedVibe] = useState("sacred-classic");
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [generateStep, setGenerateStep] = useState<GenerateStep>("analyzing");
@@ -184,7 +202,7 @@ export default function SlidesPage() {
     const fetchPromise = fetch("/api/slides/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ outline: sermon.outline, theme: activeTheme }),
+      body: JSON.stringify({ outline: sermon.outline, theme: activeTheme, vibe: selectedVibe }),
     });
 
     // Animate through the first three steps while the API runs
@@ -209,6 +227,7 @@ export default function SlidesPage() {
       const data = (await res.json()) as {
         slides: Slide[];
         grammarChanges: GrammarChange[];
+        theme?: { bg: string; text: string; accent: string; font: string; name: string };
       };
 
       // Sanitize IDs: LLMs don't reliably emit valid/unique UUIDs.
@@ -229,6 +248,20 @@ export default function SlidesPage() {
       setSlides(sanitizedSlides);
       setGrammarChanges(sanitizedGrammar);
       setActiveSlideIndex(0);
+      if (data.theme) {
+        setActiveTheme({
+          id: "ai-generated",
+          name: data.theme.name || "AI Generated",
+          description: "",
+          preview: "",
+          style: {
+            bg: data.theme.bg,
+            text: data.theme.text,
+            accent: data.theme.accent,
+            font: data.theme.font || "sans",
+          },
+        });
+      }
     } catch {
       setGenerateError("Network error — please check your connection and try again.");
     } finally {
@@ -402,47 +435,6 @@ export default function SlidesPage() {
             )}
           </div>
 
-          {/* Theme selector */}
-          <div className="border-t border-border-subtle bg-bg-surface p-4 shrink-0">
-            <div className="flex items-center gap-1 mb-3">
-              <p className="text-xs font-semibold text-text-muted uppercase tracking-widest">
-                Theme
-              </p>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {THEMES.map((theme) => (
-                <button
-                  key={theme.id}
-                  onClick={() => setActiveTheme(theme)}
-                  className={cn(
-                    "shrink-0 flex flex-col gap-1.5 p-2 border transition-colors duration-100",
-                    activeTheme.id === theme.id
-                      ? "border-accent bg-accent/5"
-                      : "border-border-subtle hover:border-[#3a4052]"
-                  )}
-                >
-                  <div
-                    className={cn("w-16 h-10 border border-border-subtle/30")}
-                    style={{ backgroundColor: theme.style.bg as string }}
-                  >
-                    <div
-                      className="h-full flex items-center justify-center"
-                    >
-                      <span
-                        className="text-[8px] font-medium"
-                        style={{ color: theme.style.text as string }}
-                      >
-                        Aa
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-text-muted text-center whitespace-nowrap">
-                    {theme.name}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* RIGHT: Properties */}
@@ -645,8 +637,23 @@ export default function SlidesPage() {
             </div>
           )}
 
+          {/* Vibe picker */}
+          <div className="border-t border-border-subtle p-4 shrink-0">
+            <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1.5">
+              Style Vibe
+            </p>
+            <p className="text-[11px] text-text-muted mb-3 leading-relaxed">
+              AI crafts a unique color theme for this vibe and sermon.
+            </p>
+            <VibePicker
+              vibes={VIBES}
+              selected={selectedVibe}
+              onSelect={setSelectedVibe}
+            />
+          </div>
+
           {/* Generate button */}
-          <div className="border-t border-border-subtle p-4 mt-auto">
+          <div className="border-t border-border-subtle p-4 mt-auto shrink-0">
             <Button
               variant="primary"
               size="lg"
@@ -658,7 +665,7 @@ export default function SlidesPage() {
               Generate Slides
             </Button>
             <p className="text-xs text-text-muted text-center mt-2">
-              AI will map your outline to slides
+              {VIBES.find((v) => v.id === selectedVibe)?.name} theme + custom slides
             </p>
           </div>
         </aside>
@@ -825,6 +832,44 @@ function SlidePreview({
       >
         {slide.type}
       </div>
+    </div>
+  );
+}
+
+/* ── Vibe picker component ───────────────────────────────── */
+function VibePicker({
+  vibes,
+  selected,
+  onSelect,
+}: {
+  vibes: typeof VIBES;
+  selected: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-1.5">
+      {vibes.map((vibe) => (
+        <button
+          key={vibe.id}
+          onClick={() => onSelect(vibe.id)}
+          className={cn(
+            "flex flex-col gap-1.5 p-2 border transition-colors duration-100 text-left rounded-lg",
+            selected === vibe.id
+              ? "border-accent bg-accent/5"
+              : "border-border-subtle hover:border-[#3a4052]"
+          )}
+        >
+          <div className="flex gap-0.5 rounded-sm overflow-hidden h-3">
+            {vibe.colors.map((c, i) => (
+              <div key={i} className="flex-1" style={{ backgroundColor: c }} />
+            ))}
+          </div>
+          <p className="text-[10px] font-semibold text-text-primary leading-tight">
+            {vibe.name}
+          </p>
+          <p className="text-[9px] text-text-muted leading-tight">{vibe.tagline}</p>
+        </button>
+      ))}
     </div>
   );
 }
