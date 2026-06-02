@@ -1080,7 +1080,7 @@ export default function RhemaPage() {
       {/* ── Top bar ── */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle bg-bg-surface shrink-0 flex-wrap">
         <div className="flex items-center gap-2 mr-2">
-          <div className="h-7 w-7 bg-accent/10 border border-accent/30 flex items-center justify-center shrink-0">
+          <div className="h-7 w-7 bg-accent/10 border border-accent/30 flex items-center justify-center shrink-0 rounded-lg">
             <span className="font-serif text-base text-accent leading-none">Ρ</span>
           </div>
           <span className="text-sm font-semibold text-text-primary hidden sm:block">Rhema</span>
@@ -1088,7 +1088,7 @@ export default function RhemaPage() {
 
         <button
           onClick={() => { setBookPickerOpen(true); setChPickerOpen(false); setVPickerOpen(false); }}
-          className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary font-medium transition-colors"
+          className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary font-medium transition-colors rounded-lg"
         >
           {bookName}
           <ChevronDown className="h-3 w-3 text-text-muted" />
@@ -1096,7 +1096,7 @@ export default function RhemaPage() {
 
         <button
           onClick={() => { setChPickerOpen(true); setBookPickerOpen(false); setVPickerOpen(false); }}
-          className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors"
+          className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors rounded-lg"
         >
           Ch {chapter}
           <ChevronDown className="h-3 w-3 text-text-muted" />
@@ -1105,7 +1105,7 @@ export default function RhemaPage() {
         {!fullChapter && (
           <button
             onClick={() => { setVPickerOpen(true); setBookPickerOpen(false); setChPickerOpen(false); }}
-            className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors"
+            className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors rounded-lg"
           >
             v {verse}
             <ChevronDown className="h-3 w-3 text-text-muted" />
@@ -1114,10 +1114,10 @@ export default function RhemaPage() {
 
         {!fullChapter && (
           <div className="flex items-center gap-1">
-            <button onClick={() => navigateVerse(-1)} className="h-8 w-8 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors">
+            <button onClick={() => navigateVerse(-1)} className="h-8 w-8 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors rounded-lg">
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <button onClick={() => navigateVerse(1)} className="h-8 w-8 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors">
+            <button onClick={() => navigateVerse(1)} className="h-8 w-8 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors rounded-lg">
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
@@ -1126,7 +1126,7 @@ export default function RhemaPage() {
         <div className="ml-auto flex items-center gap-1.5 flex-wrap">
           {/* Copy verse */}
           <button onClick={copyVerse} title="Copy verse"
-            className={cn("h-7 w-7 flex items-center justify-center border transition-colors",
+            className={cn("h-7 w-7 flex items-center justify-center border transition-colors rounded-lg",
               copied ? "border-accent text-accent bg-accent/10" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
             )}>
             {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
@@ -1167,7 +1167,7 @@ export default function RhemaPage() {
             <button
               onClick={() => setShowWandPopup(v => !v)}
               title="View modes & highlighting"
-              className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors relative",
+              className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors relative rounded-lg",
                 showWandPopup || hasActiveMode
                   ? "border-accent text-accent bg-accent/10"
                   : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
@@ -1327,7 +1327,7 @@ export default function RhemaPage() {
           </div>
           <input value={bookSearch} onChange={e => setBookSearch(e.target.value)}
             placeholder="Search books…"
-            className="w-full h-8 bg-bg-elevated border border-border-subtle px-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent mb-4"
+            className="w-full h-9 bg-bg-elevated border border-border-subtle px-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent mb-4 rounded-lg"
             autoFocus />
           {otBooks.length > 0 && (
             <>
@@ -1335,7 +1335,7 @@ export default function RhemaPage() {
               <div className="grid grid-cols-3 gap-1 mb-4">
                 {otBooks.map(c => (
                   <button key={c} onClick={() => selectBook(c)}
-                    className={cn("px-2 py-1.5 text-xs text-left transition-colors border",
+                    className={cn("px-2 py-1.5 text-xs text-left transition-colors border rounded-lg",
                       c === book ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:text-text-primary hover:border-[#3a4052]")}>
                     {BOOK_NAMES[c] || c}
                   </button>
@@ -1349,7 +1349,7 @@ export default function RhemaPage() {
               <div className="grid grid-cols-3 gap-1">
                 {ntBooks.map(c => (
                   <button key={c} onClick={() => selectBook(c)}
-                    className={cn("px-2 py-1.5 text-xs text-left transition-colors border",
+                    className={cn("px-2 py-1.5 text-xs text-left transition-colors border rounded-lg",
                       c === book ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:text-text-primary hover:border-[#3a4052]")}>
                     {BOOK_NAMES[c] || c}
                   </button>
@@ -1370,7 +1370,7 @@ export default function RhemaPage() {
           <div className="grid grid-cols-6 gap-1.5">
             {chapters.map(c => (
               <button key={c} onClick={() => selectChapter(c)}
-                className={cn("h-9 text-sm font-medium border transition-colors",
+                className={cn("h-9 text-sm font-medium border transition-colors rounded-lg",
                   c === chapter ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:text-text-primary hover:border-[#3a4052]")}>
                 {c}
               </button>
@@ -1389,7 +1389,7 @@ export default function RhemaPage() {
           <div className="grid grid-cols-6 gap-1.5">
             {verses.map(v => (
               <button key={v} onClick={() => selectVerse(v)}
-                className={cn("h-9 text-sm font-medium border transition-colors",
+                className={cn("h-9 text-sm font-medium border transition-colors rounded-lg",
                   v === verse ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:text-text-primary hover:border-[#3a4052]")}>
                 {v}
               </button>
@@ -1604,7 +1604,7 @@ function GrammarExamplesModal({ category, value, onClose }: {
       className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-6"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-bg-surface border border-border-subtle shadow-2xl w-full max-w-md">
+      <div className="bg-bg-surface border border-border-subtle shadow-2xl w-full max-w-md rounded-2xl overflow-hidden animate-scaleIn">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <h2 className="text-sm font-semibold text-text-primary">
             {entry?.title ?? `${value} — Grammar Example`}
@@ -1642,8 +1642,10 @@ function VerseView({
   const words = getWords(book, chapter, verse, textMode);
   const ref = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
   return (
-    <div className="max-w-3xl">
-      <p className="text-xs font-semibold text-accent uppercase tracking-widest mb-6">{ref}</p>
+    <div className="max-w-3xl mx-auto">
+      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 mb-7">
+        <span className="text-xs font-semibold text-accent tracking-wide">{ref}</span>
+      </div>
       <div className={cn("flex flex-wrap gap-x-3 gap-y-4 mb-6", greekOnly && "gap-y-2")}>
         {words.map((w, i) => {
           const cat = normalizePosKey(w[2]);
@@ -1684,8 +1686,10 @@ function ChapterView({
   const verses = getVerses(book, chapter, textMode);
   const bookName = BOOK_NAMES[book] || book;
   return (
-    <div className="max-w-3xl">
-      <p className="text-xs font-semibold text-accent uppercase tracking-widest mb-6">{bookName} {chapter}</p>
+    <div className="max-w-3xl mx-auto">
+      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 mb-7">
+        <span className="text-xs font-semibold text-accent tracking-wide">{bookName} {chapter}</span>
+      </div>
       {verses.map(v => {
         const words = getWords(book, chapter, v, textMode);
         const engText = getEnglishText(book, chapter, v, textMode);
@@ -1740,7 +1744,7 @@ function WordChip({
     <button
       onClick={onClick}
       className={cn(
-        "relative flex flex-col items-center gap-0.5 px-1.5 py-1 border transition-colors duration-100 group",
+        "relative flex flex-col items-center gap-0.5 px-1.5 py-1 border transition-colors duration-100 group rounded-lg",
         active
           ? "border-accent bg-accent/10"
           : highlightConfig
@@ -1790,7 +1794,7 @@ function WordDetail({
   const inflected = getWordGloss(lex, morph);
 
   return (
-    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden animate-slideInRight">
       {/* Header */}
       <div className="px-4 pt-4 pb-3 border-b border-border-subtle flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -1804,7 +1808,7 @@ function WordDetail({
             </p>
           )}
           {inflected && (
-            <p className="text-xs text-text-muted mt-1.5 px-2 py-1 bg-bg-elevated border-l-2 border-accent/40 italic">
+            <p className="text-xs text-text-muted mt-1.5 px-2.5 py-1 bg-bg-elevated border border-accent/20 rounded-lg italic">
               &ldquo;{inflected}&rdquo;
             </p>
           )}
@@ -1951,7 +1955,7 @@ function DefinitionTab({ strongs, morph }: { strongs: number; morph: string }) {
   return (
     <div className="flex flex-col gap-4">
       {quickDisplay && (
-        <div className="p-2.5 bg-accent/5 border-l-2 border-accent/50">
+        <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl">
           <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">
             {inflected ? "Inflected Gloss" : "Quick Definition"}
           </p>
@@ -2054,7 +2058,7 @@ function CrossRefsPanel({ book, chapter, verse, crossRefs, onClose, onNavigate, 
   const labels = window.RhemaCrossRefLabels || [];
   const hasAny = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
   return (
-    <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+    <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden animate-slideInRight">
       <PanelHeader title="Cross References" subtitle={`${BOOK_NAMES[book] || book} ${chapter}:${verse}`} onClose={onClose} />
       <div className="flex-1 overflow-y-auto">
         {!hasAny ? (
@@ -2110,7 +2114,7 @@ function WandPopup({
   onToggleEnglish: () => void; onToggleTextMode: () => void; onToggleHighlight: () => void;
 }) {
   return (
-    <div className="absolute right-0 top-full mt-1 w-56 bg-bg-surface border border-border-subtle shadow-2xl z-[39] py-1.5">
+    <div className="absolute right-0 top-full mt-1 w-56 bg-bg-surface border border-border-subtle shadow-2xl z-[39] py-1.5 rounded-xl overflow-hidden">
       <WandItem active={syntaxMode} label="Syntax Diagram" desc="See clause structure & grammar roles" onClick={onToggleSyntax} />
       <div className="my-1 border-t border-border-subtle/60" />
       <WandItem active={greekOnly} label="Greek Only" desc="Hide word glosses beneath text" onClick={onToggleGreekOnly} />
@@ -2411,7 +2415,7 @@ function StudyWorkspacePanel({
       </div>
       <div className="p-4 border-t border-border-subtle shrink-0">
         <button onClick={onSave} disabled={noteSaving}
-          className={cn("w-full h-8 flex items-center justify-center gap-2 text-xs font-medium border transition-colors disabled:opacity-60",
+          className={cn("w-full h-9 flex items-center justify-center gap-2 text-xs font-medium border transition-colors disabled:opacity-60 rounded-lg",
             noteSaved ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
           {noteSaved ? <><Check className="h-3.5 w-3.5" /> Saved</>
             : noteSaving ? <><div className="h-3.5 w-3.5 border border-current border-t-transparent rounded-full animate-spin" /> Saving…</>
@@ -2443,7 +2447,7 @@ function PickerOverlay({ children, onClose }: { children: React.ReactNode; onClo
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-16"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-bg-surface border border-border-subtle shadow-2xl w-full max-w-lg max-h-[70vh] overflow-y-auto p-5 mx-4">
+      <div className="bg-bg-surface border border-border-subtle shadow-2xl w-full max-w-lg max-h-[70vh] overflow-y-auto p-5 mx-4 rounded-2xl animate-scaleIn">
         {children}
       </div>
     </div>
@@ -2456,7 +2460,7 @@ function ToolBtn({ active, onClick, label, dot, children }: {
 }) {
   return (
     <button onClick={onClick} title={label}
-      className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors relative",
+      className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors relative rounded-lg",
         active ? "border-accent text-accent bg-accent/10" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
       {children}
       <span className="text-[10px] hidden sm:inline">{label}</span>
