@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Wand2 } from "lucide-react";
 import { useAuthContext } from "@/components/AuthProvider";
 import { createSermon } from "@/lib/sermons";
 import { Button } from "@/components/ui/button";
@@ -54,112 +54,189 @@ export default function NewSermonPage() {
   }
 
   return (
-    <div className="p-8 max-w-2xl">
-      {/* Breadcrumb */}
-      <Link
-        href="/sermon"
-        className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors mb-8"
-      >
-        <ChevronLeft className="h-4 w-4" />
-        Back to Sermons
-      </Link>
+    <div
+      className="h-full overflow-y-auto rounded-2xl"
+      style={{
+        backgroundColor: "var(--bg-surface)",
+        boxShadow: "var(--shadow-card)",
+        border: "1px solid var(--border-subtle)",
+      }}
+    >
+      <div className="max-w-xl mx-auto px-8 py-8">
+        {/* Back link */}
+        <Link
+          href="/sermon"
+          className="inline-flex items-center gap-1.5 text-sm font-medium transition-colors mb-8"
+          style={{ color: "var(--text-muted)" }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.color = "var(--text-primary)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.color = "var(--text-muted)";
+          }}
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back to Sermons
+        </Link>
 
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-text-primary mb-1">
-          New Sermon
-        </h1>
-        <p className="text-sm text-text-muted">
-          Fill in the basics — you can always edit everything in the workshop.
-        </p>
-      </div>
-
-      <form
-        onSubmit={handleSubmit}
-        className="bg-bg-surface border border-border-subtle p-8 flex flex-col gap-6"
-      >
-        <Input
-          label="Sermon title"
-          type="text"
-          placeholder="e.g. The Bread of Life"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          required
-        />
-
-        <Input
-          label="Primary scripture reference"
-          type="text"
-          placeholder="e.g. John 6:35–51"
-          value={scriptureRef}
-          onChange={(e) => setScriptureRef(e.target.value)}
-          hint="The main passage this sermon is drawn from"
-        />
-
-        <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-text-muted">
-            Theme / brief description
-          </label>
-          <textarea
-            value={theme}
-            onChange={(e) => setTheme(e.target.value)}
-            placeholder="e.g. Jesus presents himself as the true sustenance for the human soul — sufficient where manna was not."
-            rows={3}
-            className="w-full bg-bg-elevated border border-border-subtle px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent hover:border-[#3a4052] transition-colors"
-          />
-          <p className="text-xs text-text-muted">
-            One or two sentences on the central idea
+        <div className="mb-8">
+          <h1
+            className="text-2xl font-bold mb-1.5"
+            style={{ color: "var(--text-primary)" }}
+          >
+            New Sermon
+          </h1>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            Fill in the basics — you can always edit everything in the workshop.
           </p>
         </div>
 
-        {error && (
-          <p className="text-sm text-danger bg-danger/5 border border-danger/20 px-3 py-2">
-            {error}
-          </p>
-        )}
+        <div
+          className="rounded-2xl p-7 flex flex-col gap-6 mb-6"
+          style={{
+            backgroundColor: "var(--bg-elevated)",
+            border: "1px solid var(--border-subtle)",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+          <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+            <Input
+              label="Sermon title"
+              type="text"
+              placeholder="e.g. The Bread of Life"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+            />
 
-        <div className="flex items-center gap-3 pt-2">
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            loading={loading}
-          >
-            Create Sermon
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="lg"
-            onClick={() => router.back()}
-          >
-            Cancel
-          </Button>
+            <Input
+              label="Primary scripture reference"
+              type="text"
+              placeholder="e.g. John 6:35–51"
+              value={scriptureRef}
+              onChange={(e) => setScriptureRef(e.target.value)}
+              hint="The main passage this sermon is drawn from"
+            />
+
+            <div className="flex flex-col gap-1.5">
+              <label
+                className="text-sm font-medium"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Theme / brief description
+              </label>
+              <textarea
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+                placeholder="e.g. Jesus presents himself as the true sustenance for the human soul — sufficient where manna was not."
+                rows={3}
+                className="w-full px-3.5 py-2.5 text-sm resize-none rounded-xl transition-all duration-150 focus:outline-none focus:ring-2"
+                style={{
+                  backgroundColor: "var(--bg-surface)",
+                  border: "1px solid var(--border-subtle)",
+                  color: "var(--text-primary)",
+                  "--tw-ring-color": "rgba(184,144,63,0.2)",
+                } as React.CSSProperties}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = "var(--accent)";
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "var(--border-subtle)";
+                }}
+              />
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                One or two sentences on the central idea
+              </p>
+            </div>
+
+            {error && (
+              <div
+                className="px-3.5 py-2.5 rounded-xl text-sm"
+                style={{
+                  color: "var(--danger)",
+                  backgroundColor: "rgba(192,57,43,0.06)",
+                  border: "1px solid rgba(192,57,43,0.18)",
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 pt-1">
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                loading={loading}
+              >
+                Create Sermon
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="lg"
+                onClick={() => router.back()}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
         </div>
-      </form>
 
-      {/* Example starters */}
-      <div className="mt-6">
-        <p className="text-xs text-text-muted mb-3 uppercase tracking-widest font-semibold">
-          Example starters
-        </p>
-        <div className="flex flex-col gap-2">
-          {EXAMPLE_SERMONS.map((ex) => (
-            <button
-              key={ex.title}
-              type="button"
-              onClick={() => {
-                setTitle(ex.title);
-                setScriptureRef(ex.ref);
-                setTheme(ex.theme);
-              }}
-              className="text-left px-4 py-3 bg-bg-surface border border-border-subtle hover:border-[#3a4052] hover:bg-bg-elevated transition-colors group"
+        {/* Example starters */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Wand2 className="h-3.5 w-3.5" style={{ color: "var(--text-muted)" }} />
+            <p
+              className="text-xs font-semibold uppercase tracking-widest"
+              style={{ color: "var(--text-muted)" }}
             >
-              <span className="text-sm font-medium text-text-primary group-hover:text-accent transition-colors">
-                {ex.title}
-              </span>
-              <span className="text-xs text-text-muted ml-2">{ex.ref}</span>
-            </button>
-          ))}
+              Quick starters
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            {EXAMPLE_SERMONS.map((ex) => (
+              <button
+                key={ex.title}
+                type="button"
+                onClick={() => {
+                  setTitle(ex.title);
+                  setScriptureRef(ex.ref);
+                  setTheme(ex.theme);
+                }}
+                className="text-left px-4 py-3 rounded-xl transition-all duration-150"
+                style={{
+                  backgroundColor: "var(--bg-elevated)",
+                  border: "1px solid var(--border-subtle)",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLElement).style.borderColor =
+                    "rgba(184,144,63,0.3)";
+                  (e.currentTarget as HTMLElement).style.backgroundColor =
+                    "var(--bg-surface)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLElement).style.borderColor =
+                    "var(--border-subtle)";
+                  (e.currentTarget as HTMLElement).style.backgroundColor =
+                    "var(--bg-elevated)";
+                }}
+              >
+                <span
+                  className="text-sm font-semibold"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {ex.title}
+                </span>
+                <span
+                  className="text-xs ml-2"
+                  style={{ color: "var(--accent)", opacity: 0.8 }}
+                >
+                  {ex.ref}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

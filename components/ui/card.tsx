@@ -12,12 +12,13 @@ export function Card({ children, className, onClick, hoverable }: CardProps) {
     <div
       onClick={onClick}
       className={cn(
-        "bg-bg-surface border border-border-subtle",
+        "bg-bg-surface border border-border-subtle rounded-2xl transition-all duration-200",
         hoverable &&
-          "cursor-pointer transition-colors duration-150 hover:border-[#3a4052] hover:bg-bg-elevated",
+          "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-text-muted/25",
         onClick && "cursor-pointer",
         className
       )}
+      style={{ boxShadow: "var(--shadow-card)" }}
     >
       {children}
     </div>
@@ -55,7 +56,7 @@ export function CardFooter({ children, className }: CardFooterProps) {
   return (
     <div
       className={cn(
-        "px-5 py-3 border-t border-border-subtle bg-bg-elevated/50",
+        "px-5 py-3 border-t border-border-subtle bg-bg-elevated/50 rounded-b-2xl",
         className
       )}
     >

@@ -10,20 +10,15 @@ const config: Config = {
   ],
   theme: {
     extend: {
-      colors: {
-        "bg-base": "#0f1117",
-        "bg-surface": "#161b27",
-        "bg-elevated": "#1e2433",
-        "border-subtle": "#2a3042",
-        "text-primary": "#f0f2f5",
-        "text-muted": "#8b92a5",
-        accent: "#c9a84c",
-        "accent-hover": "#e0bc6a",
-        success: "#4caf7d",
-        danger: "#e05c5c",
-      },
       minWidth: {
         "1024": "1024px",
+      },
+      borderRadius: {
+        "2xl": "16px",
+        "3xl": "20px",
+      },
+      transitionTimingFunction: {
+        smooth: "cubic-bezier(0.25, 0.46, 0.45, 0.94)",
       },
     },
   },

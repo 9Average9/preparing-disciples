@@ -27,12 +27,12 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           className={cn(
-            "h-9 w-full bg-bg-elevated border px-3 text-sm text-text-primary placeholder:text-text-muted",
-            "transition-colors duration-150",
-            "focus:outline-none focus:ring-0 focus:border-accent",
+            "h-10 w-full bg-bg-elevated border px-3.5 text-sm text-text-primary placeholder:text-text-muted",
+            "rounded-xl transition-all duration-150",
+            "focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent focus:bg-bg-surface",
             error
-              ? "border-danger focus:border-danger"
-              : "border-border-subtle hover:border-[#3a4052]",
+              ? "border-danger focus:border-danger focus:ring-danger/20"
+              : "border-border-subtle hover:border-text-muted/40",
             className
           )}
           {...props}
