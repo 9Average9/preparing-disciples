@@ -19,88 +19,101 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Sermon, Slide, SlideTheme, SlideType, GrammarChange } from "@/types";
 
-/* ── Theme definitions ─────────────────────────────────── */
-const THEMES: SlideTheme[] = [
+/* ── Vibe definitions ─────────────────────────────────── */
+const VIBES = [
   {
-    id: "heritage",
-    name: "Heritage",
-    description: "Dark wood tones, serif typography",
-    preview: "bg-[#2c1810]",
-    style: { bg: "#2c1810", text: "#f5e6c8", accent: "#c9a84c", font: "serif" },
+    id: "sacred-classic",
+    name: "Sacred & Classic",
+    tagline: "Reverent, timeless",
+    colors: ["#2c1a0e", "#c9a84c", "#f5e6c8"],
+    guide: "Rich walnut background. Gold accent. Warm cream text. Serif fonts. Traditional and ornate.",
   },
   {
-    id: "modern-light",
-    name: "Modern Light",
-    description: "Clean white, minimal",
-    preview: "bg-white",
-    style: { bg: "#ffffff", text: "#1a1a2e", accent: "#3b82f6", font: "sans" },
+    id: "bold-powerful",
+    name: "Bold & Powerful",
+    tagline: "High-impact, commanding",
+    colors: ["#0a0a0a", "#dc2626", "#ffffff"],
+    guide: "Near-black background. Bold crimson accent. Pure white text. Sans-serif. Strong and authoritative.",
   },
   {
-    id: "scripture",
-    name: "Scripture",
-    description: "Parchment & cream, classic",
-    preview: "bg-[#f5e6c8]",
-    style: {
-      bg: "#f5e6c8",
-      text: "#3d2b1f",
-      accent: "#8b5e3c",
-      font: "serif",
-    },
+    id: "warm-inviting",
+    name: "Warm & Inviting",
+    tagline: "Welcoming, pastoral",
+    colors: ["#fdf7f0", "#c17d3f", "#3d2b1f"],
+    guide: "Warm ivory background. Amber accent. Deep brown text. Friendly and approachable.",
   },
   {
-    id: "bold",
-    name: "Bold",
-    description: "High contrast, gold accents",
-    preview: "bg-black",
-    style: { bg: "#000000", text: "#ffffff", accent: "#c9a84c", font: "sans" },
+    id: "hope-renewal",
+    name: "Hope & Renewal",
+    tagline: "Fresh, uplifting",
+    colors: ["#f0f7f4", "#2e8b57", "#1a3d2e"],
+    guide: "Soft sage-white background. Forest green accent. Deep green text. Fresh and life-giving.",
   },
   {
-    id: "natural",
-    name: "Natural",
-    description: "Earthy greens and browns",
-    preview: "bg-[#2d3b2b]",
-    style: { bg: "#2d3b2b", text: "#d4e8c8", accent: "#8bc34a", font: "sans" },
+    id: "midnight-glory",
+    name: "Midnight Glory",
+    tagline: "Mysterious, worshipful",
+    colors: ["#0a0d18", "#6b7fe8", "#e8eaf6"],
+    guide: "Deep midnight navy background. Soft indigo accent. Light blue-white text. Atmospheric and contemplative.",
   },
   {
-    id: "night",
-    name: "Night",
-    description: "Deep navy, soft light text",
-    preview: "bg-[#0d1b2e]",
-    style: { bg: "#0d1b2e", text: "#e8eaf6", accent: "#7986cb", font: "sans" },
+    id: "sunrise-praise",
+    name: "Sunrise & Praise",
+    tagline: "Joyful, celebratory",
+    colors: ["#fff8f0", "#e87c2e", "#2d1a0e"],
+    guide: "Warm white background. Vibrant orange accent. Dark espresso text. Energetic and celebratory.",
+  },
+  {
+    id: "regal-anointed",
+    name: "Regal & Anointed",
+    tagline: "Majestic, prophetic",
+    colors: ["#100c1e", "#9b7fe8", "#f0ebff"],
+    guide: "Deep purple-black background. Royal purple accent. Soft lavender-white text. Majestic and anointed.",
+  },
+  {
+    id: "simple-truth",
+    name: "Simple Truth",
+    tagline: "Clean, focused",
+    colors: ["#ffffff", "#3b82f6", "#1a1a2e"],
+    guide: "Clean white background. Sky-blue accent. Near-black text. Minimal and clear. Sans-serif.",
   },
 ];
 
+const DEFAULT_THEME: SlideTheme = {
+  id: "default",
+  name: "Default",
+  description: "",
+  preview: "",
+  style: { bg: "#1a1612", text: "#f0ece4", accent: "#c9a84c", font: "serif" },
+};
+
 /* ── Default slide set ─────────────────────────────────── */
 function buildDefaultSlides(sermon: Sermon): Slide[] {
-  const points = sermon.outline.mainPoints ?? [];
-  return [
+  const slides: Slide[] = [
     {
       id: crypto.randomUUID(),
       type: "title",
       content: {
         heading: sermon.title,
-        body: sermon.outline.scriptureRef || undefined,
+        body: sermon.outline.scriptureRef || "",
       },
     },
-    ...(sermon.outline.scriptureRef
-      ? [
-          {
-            id: crypto.randomUUID(),
-            type: "scripture" as const,
-            content: {
-              verseRef: sermon.outline.scriptureRef,
-              verseText: "Add the verse text in the Sermon Workshop to see it here.",
-            },
-          },
-        ]
-      : []),
-    ...points.map(
+    {
+      id: crypto.randomUUID(),
+      type: "scripture",
+      content: {
+        verseRef: sermon.outline.scriptureRef || "Scripture Reference",
+        verseText:
+          "Scripture text will appear here once you add verses in the sermon workshop.",
+      },
+    },
+    ...sermon.outline.mainPoints.map(
       (point, i): Slide => ({
         id: crypto.randomUUID(),
         type: "point",
         content: {
           heading: `${i + 1}. ${point.title}`,
-          body: (point.subPoints ?? []).join("\n"),
+          body: point.subPoints.join("\n"),
         },
       })
     ),
@@ -109,10 +122,11 @@ function buildDefaultSlides(sermon: Sermon): Slide[] {
       type: "custom",
       content: {
         heading: "Conclusion",
-        body: sermon.outline.conclusion || undefined,
+        body: sermon.outline.conclusion || "Closing thoughts and call to action.",
       },
     },
   ];
+  return slides;
 }
 
 type GenerateStep =
@@ -136,7 +150,8 @@ export default function SlidesPage() {
   const [sermon, setSermon] = useState<Sermon | null>(null);
   const [loading, setLoading] = useState(true);
   const [slides, setSlides] = useState<Slide[]>([]);
-  const [activeTheme, setActiveTheme] = useState<SlideTheme>(THEMES[0]);
+  const [activeTheme, setActiveTheme] = useState<SlideTheme>(DEFAULT_THEME);
+  const [selectedVibe, setSelectedVibe] = useState("sacred-classic");
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [generateStep, setGenerateStep] = useState<GenerateStep>("analyzing");
@@ -187,7 +202,7 @@ export default function SlidesPage() {
     const fetchPromise = fetch("/api/slides/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ outline: sermon.outline, theme: activeTheme }),
+      body: JSON.stringify({ outline: sermon.outline, theme: activeTheme, vibe: selectedVibe }),
     });
 
     // Animate through the first three steps while the API runs
@@ -206,13 +221,13 @@ export default function SlidesPage() {
     try {
       const res = await fetchPromise;
       if (!res.ok) {
-        const errBody = await res.json().catch(() => ({})) as { error?: string };
-        setGenerateError(errBody.error ?? "Generation failed — your outline slides are still here.");
+        setGenerateError("Generation failed — your outline slides are still here.");
         return;
       }
       const data = (await res.json()) as {
         slides: Slide[];
         grammarChanges: GrammarChange[];
+        theme?: { bg: string; text: string; accent: string; font: string; name: string };
       };
 
       // Sanitize IDs: LLMs don't reliably emit valid/unique UUIDs.
@@ -233,6 +248,20 @@ export default function SlidesPage() {
       setSlides(sanitizedSlides);
       setGrammarChanges(sanitizedGrammar);
       setActiveSlideIndex(0);
+      if (data.theme) {
+        setActiveTheme({
+          id: "ai-generated",
+          name: data.theme.name || "AI Generated",
+          description: "",
+          preview: "",
+          style: {
+            bg: data.theme.bg,
+            text: data.theme.text,
+            accent: data.theme.accent,
+            font: data.theme.font || "sans",
+          },
+        });
+      }
     } catch {
       setGenerateError("Network error — please check your connection and try again.");
     } finally {
@@ -353,21 +382,16 @@ export default function SlidesPage() {
                 key={slide.id}
                 onClick={() => setActiveSlideIndex(i)}
                 className={cn(
-                  "w-full text-left mb-2 border transition-colors duration-100",
+                  "w-full text-left mb-2 border transition-all duration-150 rounded-lg overflow-hidden",
                   i === activeSlideIndex
-                    ? "border-accent bg-accent/5"
-                    : "border-border-subtle bg-bg-elevated hover:border-[#3a4052]"
+                    ? "border-accent bg-accent/5 shadow-sm"
+                    : "border-border-subtle bg-bg-elevated hover:border-accent/40 hover:shadow-sm"
                 )}
               >
-                {/* Miniature slide thumbnail */}
                 <SlideThumbnail slide={slide} theme={activeTheme} />
                 <div className="px-2 py-1.5 flex items-center gap-1.5">
-                  <span className="text-xs text-text-muted shrink-0">
-                    {i + 1}
-                  </span>
-                  <span className="text-xs text-text-muted capitalize truncate">
-                    {slide.type}
-                  </span>
+                  <span className="text-xs text-text-muted shrink-0">{i + 1}</span>
+                  <span className="text-xs text-text-muted capitalize truncate">{slide.type}</span>
                   {slide.aiModified && (
                     <Sparkles className="h-2.5 w-2.5 text-accent shrink-0" />
                   )}
@@ -378,7 +402,7 @@ export default function SlidesPage() {
           <div className="p-2 border-t border-border-subtle">
             <button
               onClick={addSlide}
-              className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-text-muted border border-dashed border-border-subtle hover:border-[#3a4052] hover:text-text-primary transition-colors"
+              className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-text-muted border border-dashed border-border-subtle hover:border-accent/40 hover:text-text-primary transition-colors rounded-lg"
             >
               <Plus className="h-3.5 w-3.5" />
               Add Slide
@@ -388,54 +412,40 @@ export default function SlidesPage() {
 
         {/* CENTER: Preview */}
         <div className="flex-1 min-w-0 flex flex-col bg-bg-base">
-          <div className="flex-1 flex items-center justify-center p-8">
+          {/* Grammar notification bar */}
+          {grammarChanges.some((g) => !g.accepted) && !generating && (
+            <div className="border-b border-accent/20 bg-accent/5 px-5 py-2.5 shrink-0 flex items-center gap-3 animate-fadeUp">
+              <AlertCircle className="h-3.5 w-3.5 text-accent shrink-0" />
+              <p className="text-xs text-text-primary flex-1">
+                <span className="font-semibold text-accent">
+                  {grammarChanges.filter((g) => !g.accepted).length}
+                </span>{" "}
+                grammar suggestion
+                {grammarChanges.filter((g) => !g.accepted).length !== 1 ? "s" : ""}
+                {" "}— select a slide on the left to review
+              </p>
+              <button
+                onClick={() =>
+                  setGrammarChanges((prev) => prev.map((g) => ({ ...g, accepted: true })))
+                }
+                className="text-xs text-accent hover:text-accent-hover font-medium transition-colors shrink-0"
+              >
+                Accept all
+              </button>
+              <button
+                onClick={() => setGrammarChanges([])}
+                className="text-xs text-text-muted hover:text-text-primary transition-colors shrink-0"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+          <div key={activeSlideIndex} className="flex-1 flex items-center justify-center p-8 animate-fadeUp">
             {activeSlide ? (
               <SlidePreview slide={activeSlide} theme={activeTheme} />
             ) : (
               <p className="text-text-muted text-sm">No slides yet.</p>
             )}
-          </div>
-
-          {/* Theme selector */}
-          <div className="border-t border-border-subtle bg-bg-surface p-4 shrink-0">
-            <div className="flex items-center gap-1 mb-3">
-              <p className="text-xs font-semibold text-text-muted uppercase tracking-widest">
-                Theme
-              </p>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {THEMES.map((theme) => (
-                <button
-                  key={theme.id}
-                  onClick={() => setActiveTheme(theme)}
-                  className={cn(
-                    "shrink-0 flex flex-col gap-1.5 p-2 border transition-colors duration-100",
-                    activeTheme.id === theme.id
-                      ? "border-accent bg-accent/5"
-                      : "border-border-subtle hover:border-[#3a4052]"
-                  )}
-                >
-                  <div
-                    className={cn("w-16 h-10 border border-border-subtle/30")}
-                    style={{ backgroundColor: theme.style.bg as string }}
-                  >
-                    <div
-                      className="h-full flex items-center justify-center"
-                    >
-                      <span
-                        className="text-[8px] font-medium"
-                        style={{ color: theme.style.text as string }}
-                      >
-                        Aa
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-xs text-text-muted text-center whitespace-nowrap">
-                    {theme.name}
-                  </p>
-                </button>
-              ))}
-            </div>
           </div>
         </div>
 
@@ -459,7 +469,7 @@ export default function SlidesPage() {
                   onChange={(e) =>
                     updateActiveSlide({ type: e.target.value as SlideType })
                   }
-                  className="h-8 bg-bg-elevated border border-border-subtle px-2 text-sm text-text-primary focus:outline-none focus:border-accent"
+                  className="h-9 bg-bg-elevated border border-border-subtle px-2 text-sm text-text-primary focus:outline-none focus:border-accent rounded-lg"
                 >
                   {(
                     [
@@ -493,7 +503,7 @@ export default function SlidesPage() {
                       },
                     })
                   }
-                  className="h-8 bg-bg-elevated border border-border-subtle px-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                  className="h-9 bg-bg-elevated border border-border-subtle px-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
                   placeholder="Slide heading"
                 />
               </div>
@@ -514,7 +524,7 @@ export default function SlidesPage() {
                     })
                   }
                   rows={4}
-                  className="bg-bg-elevated border border-border-subtle px-2 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent resize-none"
+                  className="bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent resize-none rounded-lg"
                   placeholder="Body text"
                 />
               </div>
@@ -535,7 +545,7 @@ export default function SlidesPage() {
                         },
                       })
                     }
-                    className="h-8 bg-bg-elevated border border-border-subtle px-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                    className="h-9 bg-bg-elevated border border-border-subtle px-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
                     placeholder="e.g. John 3:16"
                   />
                   <textarea
@@ -549,7 +559,7 @@ export default function SlidesPage() {
                       })
                     }
                     rows={3}
-                    className="bg-bg-elevated border border-border-subtle px-2 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent resize-none"
+                    className="bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent resize-none rounded-lg"
                     placeholder="Verse text"
                   />
                 </div>
@@ -639,8 +649,23 @@ export default function SlidesPage() {
             </div>
           )}
 
+          {/* Vibe picker */}
+          <div className="border-t border-border-subtle p-4 shrink-0">
+            <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-1.5">
+              Style Vibe
+            </p>
+            <p className="text-[11px] text-text-muted mb-3 leading-relaxed">
+              AI crafts a unique color theme for this vibe and sermon.
+            </p>
+            <VibePicker
+              vibes={VIBES}
+              selected={selectedVibe}
+              onSelect={setSelectedVibe}
+            />
+          </div>
+
           {/* Generate button */}
-          <div className="border-t border-border-subtle p-4 mt-auto">
+          <div className="border-t border-border-subtle p-4 mt-auto shrink-0">
             <Button
               variant="primary"
               size="lg"
@@ -652,7 +677,7 @@ export default function SlidesPage() {
               Generate Slides
             </Button>
             <p className="text-xs text-text-muted text-center mt-2">
-              AI will map your outline to slides
+              {VIBES.find((v) => v.id === selectedVibe)?.name} theme + custom slides
             </p>
           </div>
         </aside>
@@ -728,6 +753,7 @@ export default function SlidesPage() {
   );
 }
 
+/* ── Slide Preview ──────────────────────────────────────── */
 /* ── Slide Rendering Engine ─────────────────────────────── */
 
 type SlideProps = {
@@ -746,7 +772,6 @@ function SlidePreview({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
     accent: theme.style.accent as string,
     serif: theme.style.font === "serif",
   };
-
   return (
     <div
       className="w-full max-w-3xl aspect-video relative overflow-hidden select-none"
@@ -772,28 +797,27 @@ function SlidePreview({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
       {slide.type === "quote" && <QuoteLayout {...props} />}
       {slide.type === "illustration" && <IllustrationLayout {...props} />}
       {(slide.type === "custom" ||
-        !["title", "scripture", "point", "quote", "illustration"].includes(
-          slide.type
-        )) && <CustomLayout {...props} />}
+        !["title","scripture","point","quote","illustration"].includes(slide.type)) && (
+        <CustomLayout {...props} />
+      )}
     </div>
   );
 }
 
-/* Title — hero with radial glows and ornamental divider */
+/* Title — radial glows, ornamental divider, pill badge */
 function TitleLayout({ slide, bg, text, accent, serif }: SlideProps) {
-  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "var(--font-inter),sans-serif";
   return (
     <>
       <div className="absolute inset-0" style={{ background: `linear-gradient(135deg,${bg} 30%,${accent}18 100%)` }} />
       <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full" style={{ background: `radial-gradient(circle,${accent}22 0%,transparent 65%)` }} />
       <div className="absolute -bottom-12 -left-12 w-52 h-52 rounded-full" style={{ background: `radial-gradient(circle,${accent}14 0%,transparent 65%)` }} />
-
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-20 text-center">
         <div className="text-[9px] font-bold tracking-[0.22em] uppercase mb-5 px-3 py-1 rounded-full" style={{ color: accent, background: `${accent}18`, border: `1px solid ${accent}38` }}>
           Sermon
         </div>
         <h1 className="font-bold leading-tight mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(1.4rem,3.2vw,2.3rem)" }}>
-          {slide.content.heading || "Untitled Sermon"}
+          {slide.content.heading || "Untitled"}
         </h1>
         <div className="flex items-center gap-2 mb-4" style={{ width: 72 }}>
           <div className="h-px flex-1" style={{ background: accent }} />
@@ -811,16 +835,13 @@ function TitleLayout({ slide, bg, text, accent, serif }: SlideProps) {
   );
 }
 
-/* Scripture — giant faded quote mark, italic verse, bold ref */
+/* Scripture — giant faded quote mark, italic verse */
 function ScriptureLayout({ slide, bg, text, accent, serif }: SlideProps) {
-  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "var(--font-inter),sans-serif";
   return (
     <>
       <div className="absolute inset-0" style={{ background: `linear-gradient(160deg,${accent}0c 0%,transparent 55%)` }} />
-      <div className="absolute pointer-events-none select-none" style={{ top: -24, left: 8, fontSize: 260, color: accent, opacity: 0.08, fontFamily: "Georgia,serif", lineHeight: 1 }}>
-        &ldquo;
-      </div>
-
+      <div className="absolute pointer-events-none select-none" style={{ top: -24, left: 8, fontSize: 260, color: accent, opacity: 0.08, fontFamily: "Georgia,serif", lineHeight: 1 }}>&ldquo;</div>
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-20 text-center">
         {slide.content.verseText ? (
           <>
@@ -845,15 +866,14 @@ function ScriptureLayout({ slide, bg, text, accent, serif }: SlideProps) {
   );
 }
 
-/* Point — left accent bar, bold heading, styled bullet list */
+/* Point — left accent bar, heading, bullet list */
 function PointLayout({ slide, bg, text, accent, serif }: SlideProps) {
-  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "var(--font-inter),sans-serif";
   const lines = (slide.content.body ?? "").split("\n").filter(Boolean).slice(0, 4);
   return (
     <>
       <div className="absolute bottom-0 right-0 w-56 h-56" style={{ background: `radial-gradient(circle at bottom right,${accent}10 0%,transparent 65%)` }} />
       <div className="absolute left-0 top-0 bottom-0" style={{ width: 5, background: accent }} />
-
       <div className="relative z-10 h-full flex flex-col justify-center pl-14 pr-12">
         <h2 className="font-bold leading-tight mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(1.2rem,2.8vw,1.8rem)" }}>
           {slide.content.heading}
@@ -876,18 +896,15 @@ function PointLayout({ slide, bg, text, accent, serif }: SlideProps) {
   );
 }
 
-/* Quote — big faded marks, centered italic, optional attribution */
+/* Quote — decorative marks, centered italic */
 function QuoteLayout({ slide, bg, text, accent, serif }: SlideProps) {
-  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "var(--font-inter),sans-serif";
   const quoteText = slide.content.body || slide.content.heading || "";
   const attribution = slide.content.body && slide.content.heading ? slide.content.heading : null;
   return (
     <>
       <div className="absolute inset-0" style={{ background: `linear-gradient(135deg,${accent}0a 0%,transparent 55%)` }} />
-      <div className="absolute pointer-events-none select-none" style={{ top: -14, left: 12, fontSize: 220, color: accent, opacity: 0.09, fontFamily: "Georgia,serif", lineHeight: 1 }}>
-        &ldquo;
-      </div>
-
+      <div className="absolute pointer-events-none select-none" style={{ top: -14, left: 12, fontSize: 220, color: accent, opacity: 0.09, fontFamily: "Georgia,serif", lineHeight: 1 }}>&ldquo;</div>
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-16 text-center">
         <p className="italic leading-relaxed mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(0.95rem,2vw,1.3rem)" }}>
           &ldquo;{quoteText}&rdquo;
@@ -903,15 +920,12 @@ function QuoteLayout({ slide, bg, text, accent, serif }: SlideProps) {
   );
 }
 
-/* Illustration — split panel: accent-tinted left + text right */
+/* Illustration — split panel: accent left + text right */
 function IllustrationLayout({ slide, bg, text, accent, serif }: SlideProps) {
-  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "var(--font-inter),sans-serif";
   return (
     <>
-      <div
-        className="absolute left-0 top-0 bottom-0 flex items-center justify-center"
-        style={{ width: "38%", background: `linear-gradient(160deg,${accent}60 0%,${accent}2e 100%)` }}
-      >
+      <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center" style={{ width: "38%", background: `linear-gradient(160deg,${accent}60 0%,${accent}2e 100%)` }}>
         <svg viewBox="0 0 40 40" fill="none" style={{ width: 52, height: 52, opacity: 0.28 }} stroke={text} strokeWidth="1.2">
           <path d="M20 5v30M10 14h20" strokeLinecap="round" />
         </svg>
@@ -933,14 +947,13 @@ function IllustrationLayout({ slide, bg, text, accent, serif }: SlideProps) {
   );
 }
 
-/* Custom — clean centered with gradient corner */
+/* Custom — gradient corner, centered */
 function CustomLayout({ slide, bg, text, accent, serif }: SlideProps) {
-  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "var(--font-inter),sans-serif";
   return (
     <>
       <div className="absolute inset-0" style={{ background: `linear-gradient(135deg,${accent}09 0%,transparent 60%)` }} />
       <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full" style={{ background: `radial-gradient(circle,${accent}12 0%,transparent 65%)` }} />
-
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-16 text-center">
         {slide.content.heading && (
           <h2 className="font-bold leading-tight mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(1.3rem,2.8vw,2rem)" }}>
@@ -963,12 +976,9 @@ function SlideThumbnail({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
   const bg = theme.style.bg as string;
   const text = theme.style.text as string;
   const accent = theme.style.accent as string;
-
   return (
     <div className="w-full aspect-video relative overflow-hidden" style={{ background: bg }}>
-      {/* Gradient hint */}
       <div className="absolute inset-0" style={{ background: `linear-gradient(135deg,${accent}14 0%,transparent 70%)` }} />
-
       {slide.type === "title" && (
         <div className="relative z-10 h-full flex flex-col items-center justify-center gap-1 px-3">
           <div className="h-1 rounded-full w-10" style={{ background: accent, opacity: 0.7 }} />
@@ -989,8 +999,14 @@ function SlideThumbnail({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
           <div className="absolute left-0 top-0 bottom-0" style={{ width: 2, background: accent }} />
           <div className="relative z-10 h-full flex flex-col justify-center pl-3 pr-2 gap-1.5">
             <div className="h-1.5 rounded-full w-12" style={{ background: text, opacity: 0.65 }} />
-            <div className="flex items-center gap-1"><div className="rounded-full shrink-0" style={{ width:3,height:3,background:accent,opacity:0.7 }} /><div className="h-1 rounded-full w-8" style={{ background:text,opacity:0.4 }} /></div>
-            <div className="flex items-center gap-1"><div className="rounded-full shrink-0" style={{ width:3,height:3,background:accent,opacity:0.7 }} /><div className="h-1 rounded-full w-6" style={{ background:text,opacity:0.4 }} /></div>
+            <div className="flex items-center gap-1">
+              <div className="rounded-full shrink-0" style={{ width: 3, height: 3, background: accent, opacity: 0.7 }} />
+              <div className="h-1 rounded-full w-8" style={{ background: text, opacity: 0.4 }} />
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="rounded-full shrink-0" style={{ width: 3, height: 3, background: accent, opacity: 0.7 }} />
+              <div className="h-1 rounded-full w-6" style={{ background: text, opacity: 0.4 }} />
+            </div>
           </div>
         </>
       )}
@@ -1000,9 +1016,45 @@ function SlideThumbnail({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
           <div className="h-1 rounded-full w-10" style={{ background: text, opacity: 0.4 }} />
         </div>
       )}
-
-      {/* Bottom accent bar */}
       <div className="absolute bottom-0 left-0 right-0" style={{ height: 2, background: accent }} />
+    </div>
+  );
+}
+
+/* ── Vibe picker component ───────────────────────────────── */
+function VibePicker({
+  vibes,
+  selected,
+  onSelect,
+}: {
+  vibes: typeof VIBES;
+  selected: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-1.5">
+      {vibes.map((vibe) => (
+        <button
+          key={vibe.id}
+          onClick={() => onSelect(vibe.id)}
+          className={cn(
+            "flex flex-col gap-1.5 p-2 border transition-colors duration-100 text-left rounded-lg",
+            selected === vibe.id
+              ? "border-accent bg-accent/5"
+              : "border-border-subtle hover:border-[#3a4052]"
+          )}
+        >
+          <div className="flex gap-0.5 rounded-sm overflow-hidden h-3">
+            {vibe.colors.map((c, i) => (
+              <div key={i} className="flex-1" style={{ backgroundColor: c }} />
+            ))}
+          </div>
+          <p className="text-[10px] font-semibold text-text-primary leading-tight">
+            {vibe.name}
+          </p>
+          <p className="text-[9px] text-text-muted leading-tight">{vibe.tagline}</p>
+        </button>
+      ))}
     </div>
   );
 }
