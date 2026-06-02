@@ -72,31 +72,35 @@ const THEMES: SlideTheme[] = [
 
 /* ── Default slide set ─────────────────────────────────── */
 function buildDefaultSlides(sermon: Sermon): Slide[] {
-  const slides: Slide[] = [
+  const points = sermon.outline.mainPoints ?? [];
+  return [
     {
       id: crypto.randomUUID(),
       type: "title",
       content: {
         heading: sermon.title,
-        body: sermon.outline.scriptureRef || "",
+        body: sermon.outline.scriptureRef || undefined,
       },
     },
-    {
-      id: crypto.randomUUID(),
-      type: "scripture",
-      content: {
-        verseRef: sermon.outline.scriptureRef || "Scripture Reference",
-        verseText:
-          "Scripture text will appear here once you add verses in the sermon workshop.",
-      },
-    },
-    ...sermon.outline.mainPoints.map(
+    ...(sermon.outline.scriptureRef
+      ? [
+          {
+            id: crypto.randomUUID(),
+            type: "scripture" as const,
+            content: {
+              verseRef: sermon.outline.scriptureRef,
+              verseText: "Add the verse text in the Sermon Workshop to see it here.",
+            },
+          },
+        ]
+      : []),
+    ...points.map(
       (point, i): Slide => ({
         id: crypto.randomUUID(),
         type: "point",
         content: {
           heading: `${i + 1}. ${point.title}`,
-          body: point.subPoints.join("\n"),
+          body: (point.subPoints ?? []).join("\n"),
         },
       })
     ),
@@ -105,11 +109,10 @@ function buildDefaultSlides(sermon: Sermon): Slide[] {
       type: "custom",
       content: {
         heading: "Conclusion",
-        body: sermon.outline.conclusion || "Closing thoughts and call to action.",
+        body: sermon.outline.conclusion || undefined,
       },
     },
   ];
-  return slides;
 }
 
 type GenerateStep =
@@ -356,18 +359,8 @@ export default function SlidesPage() {
                     : "border-border-subtle bg-bg-elevated hover:border-[#3a4052]"
                 )}
               >
-                {/* Miniature slide preview */}
-                <div
-                  className="w-full aspect-video flex items-center justify-center p-2 text-center"
-                  style={{ backgroundColor: activeTheme.style.bg as string }}
-                >
-                  <p
-                    className="text-[8px] leading-tight font-medium truncate"
-                    style={{ color: activeTheme.style.text as string }}
-                  >
-                    {slide.content.heading ?? slide.type}
-                  </p>
-                </div>
+                {/* Miniature slide thumbnail */}
+                <SlideThumbnail slide={slide} theme={activeTheme} />
                 <div className="px-2 py-1.5 flex items-center gap-1.5">
                   <span className="text-xs text-text-muted shrink-0">
                     {i + 1}
@@ -735,97 +728,281 @@ export default function SlidesPage() {
   );
 }
 
-/* ── Slide Preview ──────────────────────────────────────── */
-function SlidePreview({
-  slide,
-  theme,
-}: {
+/* ── Slide Rendering Engine ─────────────────────────────── */
+
+type SlideProps = {
   slide: Slide;
-  theme: SlideTheme;
-}) {
-  const bg = theme.style.bg as string;
-  const text = theme.style.text as string;
-  const accent = theme.style.accent as string;
-  const isSerif = theme.style.font === "serif";
+  bg: string;
+  text: string;
+  accent: string;
+  serif: boolean;
+};
+
+function SlidePreview({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
+  const props: SlideProps = {
+    slide,
+    bg: theme.style.bg as string,
+    text: theme.style.text as string,
+    accent: theme.style.accent as string,
+    serif: theme.style.font === "serif",
+  };
 
   return (
     <div
-      className="w-full max-w-3xl aspect-video border border-border-subtle flex flex-col items-center justify-center p-12 relative overflow-hidden shadow-2xl"
-      style={{ backgroundColor: bg }}
+      className="w-full max-w-3xl aspect-video relative overflow-hidden select-none"
+      style={{
+        backgroundColor: props.bg,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.35), 0 4px 20px rgba(0,0,0,0.2)",
+      }}
     >
-      {/* Background image overlay */}
       {slide.backgroundImage && (
         <div
-          className="absolute inset-0 opacity-20"
+          className="absolute inset-0"
           style={{
             backgroundImage: `url(${slide.backgroundImage})`,
             backgroundSize: "cover",
             backgroundPosition: "center",
+            opacity: 0.18,
           }}
         />
       )}
+      {slide.type === "title" && <TitleLayout {...props} />}
+      {slide.type === "scripture" && <ScriptureLayout {...props} />}
+      {slide.type === "point" && <PointLayout {...props} />}
+      {slide.type === "quote" && <QuoteLayout {...props} />}
+      {slide.type === "illustration" && <IllustrationLayout {...props} />}
+      {(slide.type === "custom" ||
+        !["title", "scripture", "point", "quote", "illustration"].includes(
+          slide.type
+        )) && <CustomLayout {...props} />}
+    </div>
+  );
+}
 
-      <div className="relative z-10 text-center w-full">
-        {slide.type === "scripture" ? (
+/* Title — hero with radial glows and ornamental divider */
+function TitleLayout({ slide, bg, text, accent, serif }: SlideProps) {
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  return (
+    <>
+      <div className="absolute inset-0" style={{ background: `linear-gradient(135deg,${bg} 30%,${accent}18 100%)` }} />
+      <div className="absolute -top-20 -right-20 w-80 h-80 rounded-full" style={{ background: `radial-gradient(circle,${accent}22 0%,transparent 65%)` }} />
+      <div className="absolute -bottom-12 -left-12 w-52 h-52 rounded-full" style={{ background: `radial-gradient(circle,${accent}14 0%,transparent 65%)` }} />
+
+      <div className="relative z-10 h-full flex flex-col items-center justify-center px-20 text-center">
+        <div className="text-[9px] font-bold tracking-[0.22em] uppercase mb-5 px-3 py-1 rounded-full" style={{ color: accent, background: `${accent}18`, border: `1px solid ${accent}38` }}>
+          Sermon
+        </div>
+        <h1 className="font-bold leading-tight mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(1.4rem,3.2vw,2.3rem)" }}>
+          {slide.content.heading || "Untitled Sermon"}
+        </h1>
+        <div className="flex items-center gap-2 mb-4" style={{ width: 72 }}>
+          <div className="h-px flex-1" style={{ background: accent }} />
+          <div className="rounded-full" style={{ width: 5, height: 5, background: accent }} />
+          <div className="h-px flex-1" style={{ background: accent }} />
+        </div>
+        {(slide.content.body || slide.content.verseRef) && (
+          <p className="font-semibold tracking-widest text-[10px] uppercase" style={{ color: accent }}>
+            {slide.content.body || slide.content.verseRef}
+          </p>
+        )}
+      </div>
+      <div className="absolute bottom-0 left-0 right-0" style={{ height: 4, background: accent }} />
+    </>
+  );
+}
+
+/* Scripture — giant faded quote mark, italic verse, bold ref */
+function ScriptureLayout({ slide, bg, text, accent, serif }: SlideProps) {
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  return (
+    <>
+      <div className="absolute inset-0" style={{ background: `linear-gradient(160deg,${accent}0c 0%,transparent 55%)` }} />
+      <div className="absolute pointer-events-none select-none" style={{ top: -24, left: 8, fontSize: 260, color: accent, opacity: 0.08, fontFamily: "Georgia,serif", lineHeight: 1 }}>
+        &ldquo;
+      </div>
+
+      <div className="relative z-10 h-full flex flex-col items-center justify-center px-20 text-center">
+        {slide.content.verseText ? (
           <>
-            {slide.content.verseText && (
-              <p
-                className={cn(
-                  "text-xl leading-relaxed mb-6",
-                  isSerif && "font-serif"
-                )}
-                style={{ color: text }}
-              >
-                &ldquo;{slide.content.verseText}&rdquo;
-              </p>
-            )}
+            <p className="italic leading-relaxed mb-6" style={{ color: text, fontFamily: ff, fontSize: "clamp(0.9rem,1.9vw,1.25rem)", opacity: 0.93 }}>
+              &ldquo;{slide.content.verseText}&rdquo;
+            </p>
             {slide.content.verseRef && (
-              <p
-                className="text-sm font-semibold tracking-wide uppercase"
-                style={{ color: accent }}
-              >
-                {slide.content.verseRef}
+              <p className="font-bold tracking-[0.18em] text-[10px] uppercase" style={{ color: accent }}>
+                — {slide.content.verseRef}
               </p>
             )}
           </>
         ) : (
           <>
-            {slide.content.heading && (
-              <h2
-                className={cn(
-                  "text-3xl font-bold mb-4 leading-tight",
-                  isSerif && "font-serif"
-                )}
-                style={{ color: text }}
-              >
-                {slide.content.heading}
-              </h2>
-            )}
-            {slide.content.body && (
-              <p
-                className="text-lg leading-relaxed opacity-80 whitespace-pre-line"
-                style={{ color: text }}
-              >
-                {slide.content.body}
-              </p>
-            )}
+            {slide.content.heading && <h2 className="font-bold text-2xl mb-3" style={{ color: text, fontFamily: ff }}>{slide.content.heading}</h2>}
+            {slide.content.body && <p className="italic text-base opacity-80 leading-relaxed" style={{ color: text }}>{slide.content.body}</p>}
           </>
         )}
       </div>
+      <div className="absolute bottom-0 left-0 right-0" style={{ height: 3, background: accent }} />
+    </>
+  );
+}
 
-      {/* Theme accent line */}
-      <div
-        className="absolute bottom-0 left-0 right-0 h-1"
-        style={{ backgroundColor: accent }}
-      />
+/* Point — left accent bar, bold heading, styled bullet list */
+function PointLayout({ slide, bg, text, accent, serif }: SlideProps) {
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  const lines = (slide.content.body ?? "").split("\n").filter(Boolean).slice(0, 4);
+  return (
+    <>
+      <div className="absolute bottom-0 right-0 w-56 h-56" style={{ background: `radial-gradient(circle at bottom right,${accent}10 0%,transparent 65%)` }} />
+      <div className="absolute left-0 top-0 bottom-0" style={{ width: 5, background: accent }} />
 
-      {/* Slide type label */}
-      <div
-        className="absolute top-3 right-3 text-xs px-2 py-0.5 opacity-40"
-        style={{ color: accent, border: `1px solid ${accent}` }}
-      >
-        {slide.type}
+      <div className="relative z-10 h-full flex flex-col justify-center pl-14 pr-12">
+        <h2 className="font-bold leading-tight mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(1.2rem,2.8vw,1.8rem)" }}>
+          {slide.content.heading}
+        </h2>
+        {lines.length > 0 && (
+          <ul className="flex flex-col gap-2.5">
+            {lines.map((line, i) => (
+              <li key={i} className="flex items-start gap-3">
+                <div className="mt-1.5 shrink-0 rounded-full" style={{ width: 6, height: 6, background: accent, opacity: 0.75 }} />
+                <span className="leading-snug" style={{ color: text, opacity: 0.82, fontSize: "clamp(0.75rem,1.4vw,0.95rem)" }}>
+                  {line.replace(/^[•\-\d.]\s*/, "")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
+      <div className="absolute bottom-0 left-0 right-0" style={{ height: 3, background: accent }} />
+    </>
+  );
+}
+
+/* Quote — big faded marks, centered italic, optional attribution */
+function QuoteLayout({ slide, bg, text, accent, serif }: SlideProps) {
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  const quoteText = slide.content.body || slide.content.heading || "";
+  const attribution = slide.content.body && slide.content.heading ? slide.content.heading : null;
+  return (
+    <>
+      <div className="absolute inset-0" style={{ background: `linear-gradient(135deg,${accent}0a 0%,transparent 55%)` }} />
+      <div className="absolute pointer-events-none select-none" style={{ top: -14, left: 12, fontSize: 220, color: accent, opacity: 0.09, fontFamily: "Georgia,serif", lineHeight: 1 }}>
+        &ldquo;
+      </div>
+
+      <div className="relative z-10 h-full flex flex-col items-center justify-center px-16 text-center">
+        <p className="italic leading-relaxed mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(0.95rem,2vw,1.3rem)" }}>
+          &ldquo;{quoteText}&rdquo;
+        </p>
+        {attribution && (
+          <p className="text-[10px] font-semibold tracking-[0.2em] uppercase" style={{ color: accent }}>
+            — {attribution}
+          </p>
+        )}
+      </div>
+      <div className="absolute bottom-0 left-0 right-0" style={{ height: 3, background: accent }} />
+    </>
+  );
+}
+
+/* Illustration — split panel: accent-tinted left + text right */
+function IllustrationLayout({ slide, bg, text, accent, serif }: SlideProps) {
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  return (
+    <>
+      <div
+        className="absolute left-0 top-0 bottom-0 flex items-center justify-center"
+        style={{ width: "38%", background: `linear-gradient(160deg,${accent}60 0%,${accent}2e 100%)` }}
+      >
+        <svg viewBox="0 0 40 40" fill="none" style={{ width: 52, height: 52, opacity: 0.28 }} stroke={text} strokeWidth="1.2">
+          <path d="M20 5v30M10 14h20" strokeLinecap="round" />
+        </svg>
+      </div>
+      <div className="absolute top-0 bottom-0 right-0 flex flex-col justify-center pr-10" style={{ left: "42%" }}>
+        {slide.content.heading && (
+          <h2 className="font-bold leading-tight mb-4" style={{ color: text, fontFamily: ff, fontSize: "clamp(1rem,2.4vw,1.5rem)" }}>
+            {slide.content.heading}
+          </h2>
+        )}
+        {slide.content.body && (
+          <p className="leading-relaxed" style={{ color: text, opacity: 0.78, fontSize: "clamp(0.75rem,1.4vw,0.93rem)" }}>
+            {slide.content.body}
+          </p>
+        )}
+      </div>
+      <div className="absolute bottom-0 left-0 right-0" style={{ height: 3, background: accent }} />
+    </>
+  );
+}
+
+/* Custom — clean centered with gradient corner */
+function CustomLayout({ slide, bg, text, accent, serif }: SlideProps) {
+  const ff = serif ? "Georgia,'Times New Roman',serif" : "inherit";
+  return (
+    <>
+      <div className="absolute inset-0" style={{ background: `linear-gradient(135deg,${accent}09 0%,transparent 60%)` }} />
+      <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full" style={{ background: `radial-gradient(circle,${accent}12 0%,transparent 65%)` }} />
+
+      <div className="relative z-10 h-full flex flex-col items-center justify-center px-16 text-center">
+        {slide.content.heading && (
+          <h2 className="font-bold leading-tight mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(1.3rem,2.8vw,2rem)" }}>
+            {slide.content.heading}
+          </h2>
+        )}
+        {slide.content.body && (
+          <p className="leading-relaxed" style={{ color: text, opacity: 0.8, fontSize: "clamp(0.85rem,1.5vw,1.05rem)" }}>
+            {slide.content.body}
+          </p>
+        )}
+      </div>
+      <div className="absolute bottom-0 left-0 right-0" style={{ height: 3, background: accent }} />
+    </>
+  );
+}
+
+/* ── Miniature thumbnail for left rail ───────────────────── */
+function SlideThumbnail({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
+  const bg = theme.style.bg as string;
+  const text = theme.style.text as string;
+  const accent = theme.style.accent as string;
+
+  return (
+    <div className="w-full aspect-video relative overflow-hidden" style={{ background: bg }}>
+      {/* Gradient hint */}
+      <div className="absolute inset-0" style={{ background: `linear-gradient(135deg,${accent}14 0%,transparent 70%)` }} />
+
+      {slide.type === "title" && (
+        <div className="relative z-10 h-full flex flex-col items-center justify-center gap-1 px-3">
+          <div className="h-1 rounded-full w-10" style={{ background: accent, opacity: 0.7 }} />
+          <div className="h-1.5 rounded-full w-16" style={{ background: text, opacity: 0.7 }} />
+          <div className="h-1 rounded-full w-8" style={{ background: accent, opacity: 0.5 }} />
+        </div>
+      )}
+      {slide.type === "scripture" && (
+        <div className="relative z-10 h-full flex flex-col items-center justify-center gap-1 px-3">
+          <div className="absolute left-1 top-0 text-2xl leading-none pointer-events-none" style={{ color: accent, opacity: 0.18, fontFamily: "Georgia,serif" }}>&ldquo;</div>
+          <div className="h-1 rounded-full w-14" style={{ background: text, opacity: 0.5 }} />
+          <div className="h-1 rounded-full w-12" style={{ background: text, opacity: 0.4 }} />
+          <div className="h-1 rounded-full w-6" style={{ background: accent, opacity: 0.7 }} />
+        </div>
+      )}
+      {slide.type === "point" && (
+        <>
+          <div className="absolute left-0 top-0 bottom-0" style={{ width: 2, background: accent }} />
+          <div className="relative z-10 h-full flex flex-col justify-center pl-3 pr-2 gap-1.5">
+            <div className="h-1.5 rounded-full w-12" style={{ background: text, opacity: 0.65 }} />
+            <div className="flex items-center gap-1"><div className="rounded-full shrink-0" style={{ width:3,height:3,background:accent,opacity:0.7 }} /><div className="h-1 rounded-full w-8" style={{ background:text,opacity:0.4 }} /></div>
+            <div className="flex items-center gap-1"><div className="rounded-full shrink-0" style={{ width:3,height:3,background:accent,opacity:0.7 }} /><div className="h-1 rounded-full w-6" style={{ background:text,opacity:0.4 }} /></div>
+          </div>
+        </>
+      )}
+      {(slide.type === "quote" || slide.type === "illustration" || slide.type === "custom") && (
+        <div className="relative z-10 h-full flex flex-col items-center justify-center gap-1 px-3">
+          <div className="h-1.5 rounded-full w-14" style={{ background: text, opacity: 0.6 }} />
+          <div className="h-1 rounded-full w-10" style={{ background: text, opacity: 0.4 }} />
+        </div>
+      )}
+
+      {/* Bottom accent bar */}
+      <div className="absolute bottom-0 left-0 right-0" style={{ height: 2, background: accent }} />
     </div>
   );
 }
