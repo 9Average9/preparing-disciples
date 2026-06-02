@@ -42,6 +42,10 @@ export interface Sermon {
   updatedAt: Date;
   status: SermonStatus;
   outline: SermonOutline;
+  presentation?: {
+    slides: Slide[];
+    theme: SlideTheme;
+  };
 }
 
 export interface SlideContent {

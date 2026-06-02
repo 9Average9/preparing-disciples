@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ChevronLeft,
+  ChevronRight,
   Download,
   Save,
   Plus,
@@ -15,6 +16,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { getSermon } from "@/lib/sermons";
+import { savePresentation } from "@/lib/sermons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Sermon, Slide, SlideTheme, SlideType, GrammarChange } from "@/types";
@@ -87,6 +89,34 @@ const DEFAULT_THEME: SlideTheme = {
   style: { bg: "#1a1612", text: "#f0ece4", accent: "#c9a84c", font: "serif" },
 };
 
+/* ── Workflow config types ─────────────────────────────── */
+interface WorkflowConfig {
+  tone: string;
+  congregation: string;
+  depth: string;
+  extraContext: string;
+}
+
+const TONES = [
+  { id: "hopeful", label: "Hopeful & Encouraging", desc: "Inspire, comfort, uplift" },
+  { id: "bold", label: "Bold & Convicting", desc: "Challenge, call to action" },
+  { id: "teaching", label: "Teaching & Instructional", desc: "Unpack scripture, explain doctrine" },
+  { id: "celebratory", label: "Celebratory & Praise", desc: "Joy, worship, thanksgiving" },
+];
+
+const CONGREGATIONS = [
+  { id: "mixed", label: "Mixed Congregation", desc: "All ages, general church" },
+  { id: "youth", label: "Youth & Young Adults", desc: "Teens to 30s, contemporary" },
+  { id: "mature", label: "Mature Adults", desc: "Traditional, in-depth" },
+  { id: "seekers", label: "New Believers / Seekers", desc: "Exploring faith" },
+];
+
+const DEPTHS = [
+  { id: "compact", label: "Compact", desc: "8–10 slides" },
+  { id: "standard", label: "Standard", desc: "12–15 slides" },
+  { id: "full", label: "Full", desc: "18–22 slides" },
+];
+
 /* ── Default slide set ─────────────────────────────────── */
 function buildDefaultSlides(sermon: Sermon): Slide[] {
   const slides: Slide[] = [
@@ -138,9 +168,9 @@ type GenerateStep =
 
 const GENERATE_STEPS: { key: GenerateStep; label: string }[] = [
   { key: "analyzing", label: "Analyzing sermon outline" },
-  { key: "designing", label: "Designing slide layouts" },
-  { key: "imagery", label: "Selecting imagery prompts" },
-  { key: "finalizing", label: "Finalizing slides" },
+  { key: "designing", label: "Crafting custom slide layouts" },
+  { key: "imagery", label: "Writing scene prompts" },
+  { key: "finalizing", label: "Finalizing your presentation" },
 ];
 
 export default function SlidesPage() {
@@ -158,6 +188,8 @@ export default function SlidesPage() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [grammarChanges, setGrammarChanges] = useState<GrammarChange[]>([]);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showWorkflow, setShowWorkflow] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -165,7 +197,12 @@ export default function SlidesPage() {
       .then((s) => {
         if (s) {
           setSermon(s);
-          setSlides(buildDefaultSlides(s));
+          if (s.presentation?.slides?.length) {
+            setSlides(s.presentation.slides);
+            setActiveTheme(s.presentation.theme);
+          } else {
+            setSlides(buildDefaultSlides(s));
+          }
         }
       })
       .catch(console.error)
@@ -192,30 +229,50 @@ export default function SlidesPage() {
     );
   }
 
-  async function handleGenerate() {
+  async function handleSave() {
+    if (!sermon || saving) return;
+    setSaving(true);
+    try {
+      await savePresentation(sermon.id, slides, activeTheme);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      console.error("Save error:", err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleGenerate(config: WorkflowConfig) {
     if (!sermon) return;
+    setShowWorkflow(false);
     setGenerating(true);
     setGenerateError(null);
     setGenerateStep("analyzing");
 
-    // Fire the API call immediately so it runs in parallel with the animation
     const fetchPromise = fetch("/api/slides/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ outline: sermon.outline, theme: activeTheme, vibe: selectedVibe }),
+      body: JSON.stringify({
+        outline: sermon.outline,
+        theme: activeTheme,
+        vibe: selectedVibe,
+        tone: config.tone,
+        congregation: config.congregation,
+        depth: config.depth,
+        extraContext: config.extraContext,
+      }),
     });
 
-    // Animate through the first three steps while the API runs
     const animSteps: [GenerateStep, number][] = [
       ["analyzing", 900],
-      ["designing", 1000],
+      ["designing", 1100],
       ["imagery", 900],
     ];
     for (const [step, ms] of animSteps) {
       setGenerateStep(step);
       await delay(ms);
     }
-    // Hold "finalizing" while the actual fetch completes
     setGenerateStep("finalizing");
 
     try {
@@ -230,8 +287,6 @@ export default function SlidesPage() {
         theme?: { bg: string; text: string; accent: string; font: string; name: string };
       };
 
-      // Sanitize IDs: LLMs don't reliably emit valid/unique UUIDs.
-      // Replace every AI-returned id with a real UUID and patch grammarChange refs.
       const idMap = new Map<string, string>();
       const sanitizedSlides = data.slides.map((s: Slide) => {
         const newId = crypto.randomUUID();
@@ -271,16 +326,13 @@ export default function SlidesPage() {
   }
 
   function acceptGrammarChange(slideId: string) {
-    // Only act on the first unaccepted change for this slide (the one the user sees)
     const change = grammarChanges.find(
       (g) => g.slideId === slideId && !g.accepted
     );
     if (!change) return;
 
     setGrammarChanges((prev) =>
-      prev.map((g) =>
-        g === change ? { ...g, accepted: true } : g
-      )
+      prev.map((g) => (g === change ? { ...g, accepted: true } : g))
     );
     setSlides((prev) =>
       prev.map((s) => {
@@ -293,7 +345,6 @@ export default function SlidesPage() {
   }
 
   function rejectGrammarChange(slideId: string) {
-    // Remove only the first unaccepted change for this slide
     const change = grammarChanges.find(
       (g) => g.slideId === slideId && !g.accepted
     );
@@ -340,22 +391,17 @@ export default function SlidesPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => {
-              setSaved(true);
-              setTimeout(() => setSaved(false), 2000);
-            }}
+            onClick={handleSave}
+            loading={saving}
           >
             {saved ? (
               <Check className="h-3.5 w-3.5 text-success" />
             ) : (
               <Save className="h-3.5 w-3.5" />
             )}
-            {saved ? "Saved" : "Save"}
+            {saved ? "Saved!" : "Save"}
           </Button>
-          <div
-            className="relative group"
-            title="PPTX export — coming soon"
-          >
+          <div className="relative group" title="PPTX export — coming soon">
             <Button variant="secondary" size="sm" disabled>
               <Download className="h-3.5 w-3.5" />
               Export PPTX
@@ -412,7 +458,6 @@ export default function SlidesPage() {
 
         {/* CENTER: Preview */}
         <div className="flex-1 min-w-0 flex flex-col bg-bg-base">
-          {/* Grammar notification bar */}
           {grammarChanges.some((g) => !g.accepted) && !generating && (
             <div className="border-b border-accent/20 bg-accent/5 px-5 py-2.5 shrink-0 flex items-center gap-3 animate-fadeUp">
               <AlertCircle className="h-3.5 w-3.5 text-accent shrink-0" />
@@ -497,10 +542,7 @@ export default function SlidesPage() {
                   value={activeSlide.content.heading ?? ""}
                   onChange={(e) =>
                     updateActiveSlide({
-                      content: {
-                        ...activeSlide.content,
-                        heading: e.target.value,
-                      },
+                      content: { ...activeSlide.content, heading: e.target.value },
                     })
                   }
                   className="h-9 bg-bg-elevated border border-border-subtle px-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
@@ -517,10 +559,7 @@ export default function SlidesPage() {
                   value={activeSlide.content.body ?? ""}
                   onChange={(e) =>
                     updateActiveSlide({
-                      content: {
-                        ...activeSlide.content,
-                        body: e.target.value,
-                      },
+                      content: { ...activeSlide.content, body: e.target.value },
                     })
                   }
                   rows={4}
@@ -529,7 +568,7 @@ export default function SlidesPage() {
                 />
               </div>
 
-              {/* Verse ref (if scripture type) */}
+              {/* Verse ref (scripture type) */}
               {activeSlide.type === "scripture" && (
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold text-text-muted uppercase tracking-widest">
@@ -539,10 +578,7 @@ export default function SlidesPage() {
                     value={activeSlide.content.verseRef ?? ""}
                     onChange={(e) =>
                       updateActiveSlide({
-                        content: {
-                          ...activeSlide.content,
-                          verseRef: e.target.value,
-                        },
+                        content: { ...activeSlide.content, verseRef: e.target.value },
                       })
                     }
                     className="h-9 bg-bg-elevated border border-border-subtle px-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
@@ -552,10 +588,7 @@ export default function SlidesPage() {
                     value={activeSlide.content.verseText ?? ""}
                     onChange={(e) =>
                       updateActiveSlide({
-                        content: {
-                          ...activeSlide.content,
-                          verseText: e.target.value,
-                        },
+                        content: { ...activeSlide.content, verseText: e.target.value },
                       })
                     }
                     rows={3}
@@ -565,13 +598,13 @@ export default function SlidesPage() {
                 </div>
               )}
 
-              {/* Background image */}
+              {/* Background image / image prompt */}
               <div className="flex flex-col gap-2 border-t border-border-subtle pt-4">
                 <label className="text-xs font-semibold text-text-muted uppercase tracking-widest">
                   Background Image
                 </label>
                 {activeSlide.backgroundImage ? (
-                  <div className="relative aspect-video bg-bg-elevated border border-border-subtle overflow-hidden">
+                  <div className="relative aspect-video bg-bg-elevated border border-border-subtle overflow-hidden rounded-lg">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={activeSlide.backgroundImage}
@@ -580,24 +613,24 @@ export default function SlidesPage() {
                     />
                   </div>
                 ) : (
-                  <div className="aspect-video bg-bg-elevated border border-dashed border-border-subtle flex items-center justify-center">
+                  <div className="aspect-video bg-bg-elevated border border-dashed border-border-subtle flex items-center justify-center rounded-lg">
                     <ImageIcon className="h-6 w-6 text-border-subtle" />
                   </div>
                 )}
+                {activeSlide.content.imagePrompt && (
+                  <p className="text-xs text-text-muted italic leading-relaxed px-1">
+                    Scene: &ldquo;{activeSlide.content.imagePrompt}&rdquo;
+                  </p>
+                )}
                 <div className="flex gap-2">
-                  <button className="flex-1 py-1.5 text-xs text-text-muted border border-border-subtle hover:border-[#3a4052] hover:text-text-primary transition-colors">
-                    Change Image
+                  <button className="flex-1 py-1.5 text-xs text-text-muted border border-border-subtle hover:border-[#3a4052] hover:text-text-primary transition-colors rounded">
+                    Upload Image
                   </button>
-                  <button className="flex-1 py-1.5 text-xs text-accent border border-accent/30 hover:bg-accent/5 transition-colors flex items-center justify-center gap-1">
+                  <button className="flex-1 py-1.5 text-xs text-accent border border-accent/30 hover:bg-accent/5 transition-colors flex items-center justify-center gap-1 rounded">
                     <Sparkles className="h-3 w-3" />
                     AI Generate
                   </button>
                 </div>
-                {activeSlide.content.imagePrompt && (
-                  <p className="text-xs text-text-muted italic">
-                    Prompt: {activeSlide.content.imagePrompt}
-                  </p>
-                )}
               </div>
 
               {/* AI grammar suggestion */}
@@ -607,33 +640,33 @@ export default function SlidesPage() {
                 );
                 if (!change) return null;
                 return (
-                  <div className="border border-accent/30 bg-accent/5 p-3 flex flex-col gap-2">
+                  <div className="border border-accent/30 bg-accent/5 p-3 flex flex-col gap-2 rounded-lg">
                     <div className="flex items-center gap-1.5">
                       <AlertCircle className="h-3.5 w-3.5 text-accent" />
                       <span className="text-xs font-semibold text-accent uppercase tracking-widest">
-                        AI Adjusted
+                        AI Suggestion
                       </span>
                     </div>
                     <p className="text-xs text-text-muted">{change.reason}</p>
                     <div className="flex flex-col gap-1">
-                      <div className="text-xs bg-danger/5 border border-danger/20 px-2 py-1 line-through text-text-muted">
+                      <div className="text-xs bg-danger/5 border border-danger/20 px-2 py-1 line-through text-text-muted rounded">
                         {change.original}
                       </div>
-                      <div className="text-xs bg-success/5 border border-success/20 px-2 py-1 text-text-primary">
+                      <div className="text-xs bg-success/5 border border-success/20 px-2 py-1 text-text-primary rounded">
                         {change.suggested}
                       </div>
                     </div>
                     <div className="flex gap-2">
                       <button
                         onClick={() => acceptGrammarChange(activeSlide.id)}
-                        className="flex-1 py-1 text-xs text-success border border-success/30 hover:bg-success/5 transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 py-1 text-xs text-success border border-success/30 hover:bg-success/5 transition-colors flex items-center justify-center gap-1 rounded"
                       >
                         <Check className="h-3 w-3" />
                         Accept
                       </button>
                       <button
                         onClick={() => rejectGrammarChange(activeSlide.id)}
-                        className="flex-1 py-1 text-xs text-text-muted border border-border-subtle hover:border-[#3a4052] transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 py-1 text-xs text-text-muted border border-border-subtle hover:border-[#3a4052] transition-colors flex items-center justify-center gap-1 rounded"
                       >
                         <X className="h-3 w-3" />
                         Reject
@@ -670,18 +703,27 @@ export default function SlidesPage() {
               variant="primary"
               size="lg"
               className="w-full"
-              onClick={handleGenerate}
-              loading={generating}
+              onClick={() => setShowWorkflow(true)}
+              disabled={generating}
             >
               <Sparkles className="h-4 w-4" />
-              Generate Slides
+              {sermon.presentation?.slides?.length ? "Regenerate Slides" : "Generate Slides"}
             </Button>
             <p className="text-xs text-text-muted text-center mt-2">
-              {VIBES.find((v) => v.id === selectedVibe)?.name} theme + custom slides
+              Customize tone & style before generating
             </p>
           </div>
         </aside>
       </div>
+
+      {/* Workflow Modal */}
+      {showWorkflow && (
+        <SlideWorkflowModal
+          onGenerate={handleGenerate}
+          onCancel={() => setShowWorkflow(false)}
+          defaultVibe={selectedVibe}
+        />
+      )}
 
       {/* Generate Loading Modal */}
       {generating && (
@@ -698,14 +740,11 @@ export default function SlidesPage() {
             </div>
             <div className="w-full flex flex-col gap-2">
               {GENERATE_STEPS.map((step) => {
-                // "done" means all complete; use length so all steps are < it
                 const currentIndex =
                   generateStep === "done"
                     ? GENERATE_STEPS.length
                     : GENERATE_STEPS.findIndex((s) => s.key === generateStep);
-                const stepIndex = GENERATE_STEPS.findIndex(
-                  (s) => s.key === step.key
-                );
+                const stepIndex = GENERATE_STEPS.findIndex((s) => s.key === step.key);
                 const isComplete = stepIndex < currentIndex;
                 const isActive = step.key === generateStep;
                 return (
@@ -736,7 +775,7 @@ export default function SlidesPage() {
         </div>
       )}
 
-      {/* Error toast — shown after modal closes if generation failed */}
+      {/* Error toast */}
       {generateError && !generating && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-lg border border-danger/25 bg-bg-surface max-w-sm w-full mx-4">
           <AlertCircle className="h-4 w-4 text-danger shrink-0" />
@@ -753,9 +792,203 @@ export default function SlidesPage() {
   );
 }
 
-/* ── Slide Preview ──────────────────────────────────────── */
-/* ── Slide Rendering Engine ─────────────────────────────── */
+/* ── Slide Workflow Modal ────────────────────────────────── */
+function SlideWorkflowModal({
+  onGenerate,
+  onCancel,
+  defaultVibe,
+}: {
+  onGenerate: (config: WorkflowConfig) => void;
+  onCancel: () => void;
+  defaultVibe: string;
+}) {
+  const [step, setStep] = useState(1);
+  const [tone, setTone] = useState("");
+  const [congregation, setCongregation] = useState("");
+  const [depth, setDepth] = useState("standard");
+  const [extraContext, setExtraContext] = useState("");
 
+  function handleGenerate() {
+    onGenerate({
+      tone: tone || "hopeful",
+      congregation: congregation || "mixed",
+      depth,
+      extraContext,
+    });
+  }
+
+  const canNext1 = tone !== "";
+  const canNext2 = congregation !== "";
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-bg-surface border border-border-subtle rounded-2xl w-full max-w-lg flex flex-col overflow-hidden shadow-2xl">
+        {/* Header */}
+        <div className="px-6 pt-6 pb-4 border-b border-border-subtle flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-text-primary">Build Your Slides</h2>
+            <p className="text-xs text-text-muted mt-0.5">Step {step} of 3</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {[1, 2, 3].map((n) => (
+              <div
+                key={n}
+                className={cn(
+                  "rounded-full transition-all",
+                  n === step
+                    ? "w-5 h-2 bg-accent"
+                    : n < step
+                      ? "w-2 h-2 bg-accent/50"
+                      : "w-2 h-2 bg-border-subtle"
+                )}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Step 1: Tone */}
+        {step === 1 && (
+          <div className="px-6 py-5 flex flex-col gap-4">
+            <div>
+              <p className="text-sm font-semibold text-text-primary mb-1">
+                What&apos;s the primary feel of this message?
+              </p>
+              <p className="text-xs text-text-muted">This shapes the energy and language of your slides.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {TONES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTone(t.id)}
+                  className={cn(
+                    "text-left p-3.5 border rounded-xl transition-all",
+                    tone === t.id
+                      ? "border-accent bg-accent/8 shadow-sm"
+                      : "border-border-subtle hover:border-accent/40 bg-bg-elevated"
+                  )}
+                >
+                  <p className="text-sm font-semibold text-text-primary leading-tight">{t.label}</p>
+                  <p className="text-xs text-text-muted mt-1">{t.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Congregation + Depth */}
+        {step === 2 && (
+          <div className="px-6 py-5 flex flex-col gap-5">
+            <div>
+              <p className="text-sm font-semibold text-text-primary mb-1">Who are you preaching to?</p>
+              <p className="text-xs text-text-muted">Tailors vocabulary, depth, and illustration style.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {CONGREGATIONS.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setCongregation(c.id)}
+                  className={cn(
+                    "text-left p-3.5 border rounded-xl transition-all",
+                    congregation === c.id
+                      ? "border-accent bg-accent/8 shadow-sm"
+                      : "border-border-subtle hover:border-accent/40 bg-bg-elevated"
+                  )}
+                >
+                  <p className="text-sm font-semibold text-text-primary leading-tight">{c.label}</p>
+                  <p className="text-xs text-text-muted mt-1">{c.desc}</p>
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <p className="text-sm font-semibold text-text-primary mb-2.5">How many slides?</p>
+              <div className="grid grid-cols-3 gap-2">
+                {DEPTHS.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => setDepth(d.id)}
+                    className={cn(
+                      "text-center p-3 border rounded-xl transition-all",
+                      depth === d.id
+                        ? "border-accent bg-accent/8 shadow-sm"
+                        : "border-border-subtle hover:border-accent/40 bg-bg-elevated"
+                    )}
+                  >
+                    <p className="text-sm font-semibold text-text-primary">{d.label}</p>
+                    <p className="text-xs text-text-muted mt-0.5">{d.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Extra Context */}
+        {step === 3 && (
+          <div className="px-6 py-5 flex flex-col gap-4">
+            <div>
+              <p className="text-sm font-semibold text-text-primary mb-1">
+                Anything else the AI should know? <span className="text-text-muted font-normal">(optional)</span>
+              </p>
+              <p className="text-xs text-text-muted">Season, series, special occasion, or tone notes.</p>
+            </div>
+            <textarea
+              value={extraContext}
+              onChange={(e) => setExtraContext(e.target.value)}
+              rows={5}
+              placeholder={`e.g. "This is our Easter Sunday service"\ne.g. "We're in a series called Rooted in Faith"\ne.g. "Focus on practical application for new believers"`}
+              className="bg-bg-elevated border border-border-subtle px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent resize-none rounded-xl"
+            />
+            <div className="bg-accent/5 border border-accent/20 rounded-xl px-4 py-3 flex flex-col gap-1">
+              <p className="text-xs font-semibold text-accent">Your setup</p>
+              <p className="text-xs text-text-muted">
+                Tone: <span className="text-text-primary">{TONES.find(t => t.id === tone)?.label}</span>
+                {" · "}
+                Congregation: <span className="text-text-primary">{CONGREGATIONS.find(c => c.id === congregation)?.label}</span>
+                {" · "}
+                Depth: <span className="text-text-primary">{DEPTHS.find(d => d.id === depth)?.label}</span>
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="px-6 pb-6 pt-2 flex items-center justify-between gap-3">
+          <button
+            onClick={step === 1 ? onCancel : () => setStep(step - 1)}
+            className="text-sm text-text-muted hover:text-text-primary transition-colors"
+          >
+            {step === 1 ? "Cancel" : "← Back"}
+          </button>
+          <div className="flex items-center gap-2">
+            {step < 3 ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setStep(step + 1)}
+                disabled={step === 1 ? !canNext1 : !canNext2}
+              >
+                Next Step
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleGenerate}
+              >
+                <Sparkles className="h-4 w-4" />
+                Build My Slides
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Slide Preview ──────────────────────────────────────── */
 type SlideProps = {
   slide: Slide;
   bg: string;
@@ -797,7 +1030,7 @@ function SlidePreview({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
       {slide.type === "quote" && <QuoteLayout {...props} />}
       {slide.type === "illustration" && <IllustrationLayout {...props} />}
       {(slide.type === "custom" ||
-        !["title","scripture","point","quote","illustration"].includes(slide.type)) && (
+        !["title", "scripture", "point", "quote", "illustration"].includes(slide.type)) && (
         <CustomLayout {...props} />
       )}
     </div>
@@ -920,24 +1153,49 @@ function QuoteLayout({ slide, bg, text, accent, serif }: SlideProps) {
   );
 }
 
-/* Illustration — split panel: accent left + text right */
+/* Illustration — accent left panel with large initial letter, story text right */
 function IllustrationLayout({ slide, bg, text, accent, serif }: SlideProps) {
   const ff = serif ? "Georgia,'Times New Roman',serif" : "var(--font-inter),sans-serif";
+  const initial = (slide.content.heading ?? "I")[0]?.toUpperCase() ?? "I";
   return (
     <>
-      <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center" style={{ width: "38%", background: `linear-gradient(160deg,${accent}60 0%,${accent}2e 100%)` }}>
-        <svg viewBox="0 0 40 40" fill="none" style={{ width: 52, height: 52, opacity: 0.28 }} stroke={text} strokeWidth="1.2">
-          <path d="M20 5v30M10 14h20" strokeLinecap="round" />
-        </svg>
+      <div
+        className="absolute left-0 top-0 bottom-0 flex items-center justify-center overflow-hidden"
+        style={{ width: "36%", background: `linear-gradient(160deg,${accent}55 0%,${accent}28 100%)` }}
+      >
+        <span
+          className="select-none font-bold leading-none pointer-events-none"
+          style={{
+            fontSize: "clamp(5rem,14vw,9rem)",
+            color: text,
+            opacity: 0.2,
+            fontFamily: serif ? "Georgia,serif" : "sans-serif",
+            transform: "rotate(-6deg)",
+          }}
+        >
+          {initial}
+        </span>
+        <div
+          className="absolute bottom-6 left-0 right-0 text-center"
+          style={{ fontSize: 9, letterSpacing: "0.22em", color: text, opacity: 0.45, textTransform: "uppercase", fontWeight: 700 }}
+        >
+          Story
+        </div>
       </div>
-      <div className="absolute top-0 bottom-0 right-0 flex flex-col justify-center pr-10" style={{ left: "42%" }}>
+      <div className="absolute top-0 bottom-0 right-0 flex flex-col justify-center pr-10" style={{ left: "40%" }}>
         {slide.content.heading && (
-          <h2 className="font-bold leading-tight mb-4" style={{ color: text, fontFamily: ff, fontSize: "clamp(1rem,2.4vw,1.5rem)" }}>
+          <h2
+            className="font-bold leading-tight mb-4"
+            style={{ color: text, fontFamily: ff, fontSize: "clamp(1rem,2.4vw,1.5rem)" }}
+          >
             {slide.content.heading}
           </h2>
         )}
         {slide.content.body && (
-          <p className="leading-relaxed" style={{ color: text, opacity: 0.78, fontSize: "clamp(0.75rem,1.4vw,0.93rem)" }}>
+          <p
+            className="leading-relaxed italic"
+            style={{ color: text, opacity: 0.78, fontSize: "clamp(0.75rem,1.4vw,0.95rem)" }}
+          >
             {slide.content.body}
           </p>
         )}
@@ -956,12 +1214,18 @@ function CustomLayout({ slide, bg, text, accent, serif }: SlideProps) {
       <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full" style={{ background: `radial-gradient(circle,${accent}12 0%,transparent 65%)` }} />
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-16 text-center">
         {slide.content.heading && (
-          <h2 className="font-bold leading-tight mb-5" style={{ color: text, fontFamily: ff, fontSize: "clamp(1.3rem,2.8vw,2rem)" }}>
+          <h2
+            className="font-bold leading-tight mb-5"
+            style={{ color: text, fontFamily: ff, fontSize: "clamp(1.3rem,2.8vw,2rem)" }}
+          >
             {slide.content.heading}
           </h2>
         )}
         {slide.content.body && (
-          <p className="leading-relaxed" style={{ color: text, opacity: 0.8, fontSize: "clamp(0.85rem,1.5vw,1.05rem)" }}>
+          <p
+            className="leading-relaxed"
+            style={{ color: text, opacity: 0.8, fontSize: "clamp(0.85rem,1.5vw,1.05rem)" }}
+          >
             {slide.content.body}
           </p>
         )}
@@ -1010,7 +1274,25 @@ function SlideThumbnail({ slide, theme }: { slide: Slide; theme: SlideTheme }) {
           </div>
         </>
       )}
-      {(slide.type === "quote" || slide.type === "illustration" || slide.type === "custom") && (
+      {slide.type === "illustration" && (
+        <>
+          <div className="absolute left-0 top-0 bottom-0" style={{ width: "36%", background: `${accent}35` }} />
+          <div className="relative z-10 h-full flex flex-col justify-center pl-[40%] pr-2 gap-1.5">
+            <div className="h-1.5 rounded-full w-10" style={{ background: text, opacity: 0.65 }} />
+            <div className="h-1 rounded-full w-8" style={{ background: text, opacity: 0.4 }} />
+            <div className="h-1 rounded-full w-9" style={{ background: text, opacity: 0.35 }} />
+          </div>
+        </>
+      )}
+      {slide.type === "quote" && (
+        <div className="relative z-10 h-full flex flex-col items-center justify-center gap-1 px-3">
+          <div className="absolute left-1 top-0 text-xl leading-none pointer-events-none" style={{ color: accent, opacity: 0.18, fontFamily: "Georgia,serif" }}>&ldquo;</div>
+          <div className="h-1 rounded-full w-12" style={{ background: text, opacity: 0.55 }} />
+          <div className="h-1 rounded-full w-10" style={{ background: text, opacity: 0.45 }} />
+          <div className="h-0.5 rounded-full w-5 mt-0.5" style={{ background: accent, opacity: 0.6 }} />
+        </div>
+      )}
+      {slide.type === "custom" && (
         <div className="relative z-10 h-full flex flex-col items-center justify-center gap-1 px-3">
           <div className="h-1.5 rounded-full w-14" style={{ background: text, opacity: 0.6 }} />
           <div className="h-1 rounded-full w-10" style={{ background: text, opacity: 0.4 }} />

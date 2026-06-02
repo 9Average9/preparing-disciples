@@ -6,6 +6,10 @@ interface GenerateRequest {
   outline: SermonOutline;
   theme: SlideTheme;
   vibe?: string;
+  tone?: string;
+  congregation?: string;
+  depth?: string;
+  extraContext?: string;
 }
 
 interface AiTheme {
@@ -33,46 +37,80 @@ const VIBE_GUIDES: Record<string, string> = {
   "simple-truth": "Clean white background. Sky-blue accent. Near-black text. Minimal and clear. Sans-serif.",
 };
 
-const SYSTEM_PROMPT = `You are a presentation designer for sermons. Your job is to map a sermon outline into a beautiful, structured slide deck.
+const TONE_GUIDANCE: Record<string, string> = {
+  hopeful: "Warm, tender language. Include illustration slides with stories of hope. End with an uplifting quote or scripture slide. Avoid heavy bullet lists — let the content breathe.",
+  bold: "Direct, punchy bullet points (2–3 max per point slide). Add a powerful quote slide after key points. End with a strong call-to-action custom slide. Use active, commanding language.",
+  teaching: "Use more scripture slides for each referenced verse. Add clear section-header custom slides between main points. Bullet points can be detailed (up to 4). Include an 'application' custom slide near the end.",
+  celebratory: "Keep bullets short and punchy. Add joyful transition custom slides. Include a praise-focused quote slide. The final slide should feel like a declaration or celebration.",
+  contemplative: "Fewer bullet points — let single lines carry weight. More scripture slides. Use illustration slides for quiet, reflective stories. Leave space for the congregation to sit with the message.",
+};
+
+const CONGREGATION_GUIDANCE: Record<string, string> = {
+  mixed: "Accessible language for all ages. Balance depth with clarity. Use a mix of traditional and contemporary references.",
+  youth: "Contemporary, energetic language. Short punchy bullets. Metaphors and illustrations that connect to everyday life. Keep it visual and dynamic.",
+  mature: "Traditional depth. Scripture can carry more weight on its own. Detailed bullet points are appropriate. Reverent, dignified tone.",
+  seekers: "Clear, jargon-free language. Explain theological terms briefly. Welcoming transitions. Include a 'what this means for you' type custom slide.",
+  leadership: "In-depth application points. Challenge statements. Equipping language — 'how to' and 'why it matters'. Can include more complex theological depth.",
+};
+
+const DEPTH_SLIDE_COUNTS: Record<string, string> = {
+  compact: "8–10 slides total. Only the most essential moments: title, key scriptures, main points (1 slide each), conclusion.",
+  standard: "12–15 slides total. A balanced deck: title, scriptures, main points with 1–2 illustrations, transitions, conclusion.",
+  full: "18–22 slides total. A rich, detailed presentation: title, scriptures for each verse, full point slides, illustrations, quote slides, section breaks, conclusion.",
+};
+
+const SYSTEM_PROMPT = `You are a creative sermon presentation designer. Your job is to turn a sermon outline into a visually compelling, unique slide deck — one that feels specifically designed for THIS message and THIS congregation.
 
 CRITICAL: Never invent, rewrite, or paraphrase the preacher's content. Use only what is in the outline.
 
-SLIDE TYPE RULES — each type has a specific purpose and content format:
+CREATIVITY MANDATE: Every sermon deserves a unique presentation. Break out of templates:
+- Don't always use the same slide structure — vary which types appear and when
+- Some "point" slides should have just a bold headline with NO bullets for maximum visual impact
+- Use "quote" slides for powerful phrases, key scripture lines, or memorable statements
+- Use "illustration" slides for any story, analogy, or real-life example — keep them vivid
+- Add "custom" slides for section transitions, call-to-action moments, reflection pauses
+- Vary bullet count: 1–4 per point slide, not always 3
 
-"title"   — The opening slide. heading = sermon title. body = scripture reference (short, e.g. "John 6:35–51").
-"scripture" — A Bible verse display. Use verseRef (e.g. "John 6:35") and verseText (the actual verse text if provided; otherwise leave null). heading and body should be null.
-"point"   — A main teaching point. heading = the point title (can include a number, e.g. "1. Jesus is the Bread"). body = bullet points, one per line, no bullet characters (the renderer adds them). Keep each bullet to 6–10 words. Max 4 bullets.
-"illustration" — A story or illustration. heading = short title (3–5 words). body = one concise sentence summarizing the illustration.
-"quote"   — A standalone quote or key phrase. body = the quote text. heading = attribution (speaker or scripture ref), or null if none.
-"custom"  — Transition slides, section headers, or anything else. heading = the label. body = one short supporting sentence or null.
+SLIDE TYPE RULES:
+"title"       — Opening slide. heading = sermon title. body = scripture reference.
+"scripture"   — Bible verse display. verseRef = reference (e.g. "John 6:35"). verseText = the full verse text. heading/body = null.
+"point"       — Main teaching point. heading = point title. body = bullet points one per line, no bullet chars (renderer adds them). 6–10 words each. 1–4 bullets. (For bold impact, body can be null — just a headline.)
+"illustration"— Story or analogy. heading = short vivid title (3–5 words). body = one powerful sentence.
+"quote"       — Key phrase or statement. body = the quote text. heading = attribution or null.
+"custom"      — Transitions, section breaks, calls to action. heading = brief label. body = one short line or null.
 
-SLIDE ORDER: title → scripture (if ref given) → one or more slides per main point → conclusion slide.
-For points with sub-points: create one "point" slide per main point. If a point has an illustration, add an "illustration" slide after it.
+SLIDE ORDER: title → [opening scripture] → main section slides → conclusion slide.
+Within sections: point → optional illustration → optional quote.
+
+IMAGE PROMPTS: For EVERY slide, write a vivid, specific 5–8 word imagePrompt that relates directly to that slide's content and the sermon's theme. Make it painterly and atmospheric. Examples:
+  ✓ "shepherd searching rocky hillside misty dawn"
+  ✓ "hands outstretched toward golden morning light"
+  ✓ "ancient stone bridge over rushing river"
+  ✗ "sunset nature landscape" (too generic)
+  ✗ "church cross symbol" (avoid religious iconography)
+Every slide must have a unique imagePrompt.
 
 GRAMMAR: Flag only clear errors (subject-verb disagreement, spelling, missing punctuation). Never flag theological language, passive voice, or informal register.
 
-THEME GENERATION: Using the provided vibe style guide as your palette direction AND the sermon's specific topic and tone, generate a custom color theme. Make the theme feel intentionally designed for this particular sermon — vary exact hues and saturation within the vibe's direction so no two sermons look identical. High contrast between bg and text is required.
+THEME GENERATION: Using the vibe palette AND the sermon's specific topic, tone, and congregation, generate a custom color theme. Vary exact hex values within the vibe's direction so every sermon feels uniquely designed. High contrast between bg and text is required.
 
-Return ONLY a valid JSON object with this exact shape — no markdown, no explanation:
+Return ONLY valid JSON — no markdown, no explanation:
 {
-  "theme": { "bg": "#hex", "text": "#hex", "accent": "#hex", "font": "serif", "name": "Creative Theme Name" },
+  "theme": { "bg": "#hex", "text": "#hex", "accent": "#hex", "font": "serif|sans", "name": "Creative Theme Name" },
   "slides": [
     {
       "id": "1",
-      "type": "title",
-      "content": { "heading": "...", "body": "...", "verseRef": null, "verseText": null, "imagePrompt": "..." },
+      "type": "title|scripture|point|illustration|quote|custom",
+      "content": { "heading": "...", "body": "...", "verseRef": null, "verseText": null, "imagePrompt": "vivid specific 5-8 word scene" },
       "aiModified": false
     }
   ],
   "grammarChanges": [
     { "slideId": "1", "original": "exact text", "suggested": "corrected text", "reason": "brief explanation", "accepted": false }
   ]
-}
-
-imagePrompt should be 3–5 descriptive words for a background image (e.g. "golden wheat field sunset"). Always provide one.`;
+}`;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // Validate API key is configured before doing anything else
   if (!process.env.OPENAI_API_KEY) {
     console.error("Slide generation error: OPENAI_API_KEY is not set");
     return NextResponse.json(
@@ -83,13 +121,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const body = (await req.json()) as GenerateRequest;
-    const { outline, vibe } = body;
+    const { outline, vibe, tone, congregation, depth, extraContext } = body;
 
-    // Null-safe access — Firestore data may be missing sub-fields on older sermons
     const mainPoints = outline.mainPoints ?? [];
     const vibeGuide = (vibe && VIBE_GUIDES[vibe]) || "Classic and timeless with warm, reverent tones.";
-    const userContent = `
-Sermon Outline:
+    const toneGuide = (tone && TONE_GUIDANCE[tone]) || "";
+    const congregationGuide = (congregation && CONGREGATION_GUIDANCE[congregation]) || "";
+    const depthGuide = (depth && DEPTH_SLIDE_COUNTS[depth]) || DEPTH_SLIDE_COUNTS["standard"];
+
+    const userContent = `Sermon Outline:
 - Scripture Reference: ${outline.scriptureRef || "Not specified"}
 - Theme: ${outline.theme || "Not specified"}
 - Introduction: ${outline.introduction || "Empty"}
@@ -107,8 +147,17 @@ ${mainPoints
 Selected Vibe: ${vibe || "sacred-classic"}
 Vibe Style Guide: ${vibeGuide}
 
-Please generate the theme, build the slides array, and flag any grammar issues.
-`;
+Message Tone: ${tone || "not specified"}
+${toneGuide ? `Tone Guidance: ${toneGuide}` : ""}
+
+Congregation: ${congregation || "mixed"}
+${congregationGuide ? `Congregation Guidance: ${congregationGuide}` : ""}
+
+Slide Depth: ${depth || "standard"}
+Slide Count Target: ${depthGuide}
+${extraContext ? `\nSpecial Context from Preacher: ${extraContext}` : ""}
+
+Please generate the theme, build the slides, and flag any grammar issues. Make this presentation feel custom-designed for this specific sermon.`;
 
     const completion = await getOpenAIClient().chat.completions.create({
       model: "gpt-4o-mini",
@@ -117,8 +166,8 @@ Please generate the theme, build the slides array, and flag any grammar issues.
         { role: "user", content: userContent },
       ],
       response_format: { type: "json_object" },
-      max_tokens: 4096,
-      temperature: 0.3,
+      max_tokens: 6000,
+      temperature: 0.6,
     });
 
     const raw = completion.choices[0]?.message?.content ?? "{}";
@@ -143,10 +192,9 @@ Please generate the theme, build the slides array, and flag any grammar issues.
     const message = error instanceof Error ? error.message : String(error);
     console.error("Slide generation error:", message);
 
-    // Surface auth errors clearly so they're diagnosable in Vercel logs
     if (message.includes("401") || message.includes("Incorrect API key") || message.includes("invalid_api_key")) {
       return NextResponse.json(
-        { error: "OpenAI API key is invalid. Please check your Vercel environment variable." },
+        { error: "OpenAI API key is invalid. Please check your environment variable." },
         { status: 500 }
       );
     }
