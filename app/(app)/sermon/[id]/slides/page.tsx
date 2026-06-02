@@ -203,7 +203,8 @@ export default function SlidesPage() {
     try {
       const res = await fetchPromise;
       if (!res.ok) {
-        setGenerateError("Generation failed — your outline slides are still here.");
+        const errBody = await res.json().catch(() => ({})) as { error?: string };
+        setGenerateError(errBody.error ?? "Generation failed — your outline slides are still here.");
         return;
       }
       const data = (await res.json()) as {

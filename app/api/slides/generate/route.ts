@@ -51,21 +51,32 @@ Return a JSON object with this exact shape:
 Keep slide content concise — slides are not transcripts. Pull only the key point titles and scripture refs. Never invent content not present in the outline.`;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // Validate API key is configured before doing anything else
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Slide generation error: OPENAI_API_KEY is not set");
+    return NextResponse.json(
+      { error: "OpenAI API key is not configured on the server." },
+      { status: 500 }
+    );
+  }
+
   try {
     const body = (await req.json()) as GenerateRequest;
     const { outline } = body;
 
+    // Null-safe access — Firestore data may be missing sub-fields on older sermons
+    const mainPoints = outline.mainPoints ?? [];
     const userContent = `
 Sermon Outline:
 - Scripture Reference: ${outline.scriptureRef || "Not specified"}
 - Theme: ${outline.theme || "Not specified"}
 - Introduction: ${outline.introduction || "Empty"}
 - Main Points:
-${outline.mainPoints
+${mainPoints
   .map(
-    (p, i) => `  ${i + 1}. ${p.title}
-     Sub-points: ${p.subPoints.join(", ") || "None"}
-     Verses: ${p.verses.map((v) => `${v.book} ${v.chapter}:${v.verse}`).join(", ") || "None"}
+    (p, i) => `  ${i + 1}. ${p.title ?? "Untitled"}
+     Sub-points: ${(p.subPoints ?? []).join(", ") || "None"}
+     Verses: ${(p.verses ?? []).map((v) => `${v.book} ${v.chapter}:${v.verse}`).join(", ") || "None"}
      Illustration: ${p.illustration || "None"}`
   )
   .join("\n")}
@@ -81,18 +92,41 @@ Please build the slides array and flag any grammar issues.
         { role: "user", content: userContent },
       ],
       response_format: { type: "json_object" },
-      max_tokens: 2000,
+      max_tokens: 4096,
       temperature: 0.3,
     });
 
-    const raw = completion.choices[0].message.content ?? "{}";
-    const data = JSON.parse(raw) as GenerateResponse;
+    const raw = completion.choices[0]?.message?.content ?? "{}";
 
-    return NextResponse.json(data);
+    let data: GenerateResponse;
+    try {
+      data = JSON.parse(raw) as GenerateResponse;
+    } catch {
+      console.error("Slide generation error: could not parse OpenAI response", raw.slice(0, 200));
+      return NextResponse.json(
+        { error: "AI returned an unreadable response. Please try again." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      slides: data.slides ?? [],
+      grammarChanges: data.grammarChanges ?? [],
+    });
   } catch (error) {
-    console.error("Slide generation error:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Slide generation error:", message);
+
+    // Surface auth errors clearly so they're diagnosable in Vercel logs
+    if (message.includes("401") || message.includes("Incorrect API key") || message.includes("invalid_api_key")) {
+      return NextResponse.json(
+        { error: "OpenAI API key is invalid. Please check your Vercel environment variable." },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
-      { error: "Failed to generate slides" },
+      { error: "Failed to generate slides. Please try again." },
       { status: 500 }
     );
   }
