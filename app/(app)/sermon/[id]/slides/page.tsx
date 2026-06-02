@@ -137,6 +137,7 @@ export default function SlidesPage() {
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [generateStep, setGenerateStep] = useState<GenerateStep>("analyzing");
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [grammarChanges, setGrammarChanges] = useState<GrammarChange[]>([]);
   const [saved, setSaved] = useState(false);
 
@@ -176,72 +177,95 @@ export default function SlidesPage() {
   async function handleGenerate() {
     if (!sermon) return;
     setGenerating(true);
+    setGenerateError(null);
     setGenerateStep("analyzing");
 
-    const steps: GenerateStep[] = [
-      "analyzing",
-      "designing",
-      "imagery",
-      "finalizing",
+    // Fire the API call immediately so it runs in parallel with the animation
+    const fetchPromise = fetch("/api/slides/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outline: sermon.outline, theme: activeTheme }),
+    });
+
+    // Animate through the first three steps while the API runs
+    const animSteps: [GenerateStep, number][] = [
+      ["analyzing", 900],
+      ["designing", 1000],
+      ["imagery", 900],
     ];
-    for (let i = 0; i < steps.length; i++) {
-      setGenerateStep(steps[i]);
-      await delay(900 + Math.random() * 400);
+    for (const [step, ms] of animSteps) {
+      setGenerateStep(step);
+      await delay(ms);
     }
+    // Hold "finalizing" while the actual fetch completes
+    setGenerateStep("finalizing");
 
     try {
-      const res = await fetch("/api/slides/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          outline: sermon.outline,
-          theme: activeTheme,
-        }),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as {
-          slides: Slide[];
-          grammarChanges: GrammarChange[];
-        };
-        setSlides(data.slides);
-        setGrammarChanges(data.grammarChanges ?? []);
+      const res = await fetchPromise;
+      if (!res.ok) {
+        setGenerateError("Generation failed — your outline slides are still here.");
+        return;
       }
+      const data = (await res.json()) as {
+        slides: Slide[];
+        grammarChanges: GrammarChange[];
+      };
+
+      // Sanitize IDs: LLMs don't reliably emit valid/unique UUIDs.
+      // Replace every AI-returned id with a real UUID and patch grammarChange refs.
+      const idMap = new Map<string, string>();
+      const sanitizedSlides = data.slides.map((s: Slide) => {
+        const newId = crypto.randomUUID();
+        idMap.set(s.id, newId);
+        return { ...s, id: newId };
+      });
+      const sanitizedGrammar = (data.grammarChanges ?? []).map(
+        (g: GrammarChange) => ({
+          ...g,
+          slideId: idMap.get(g.slideId) ?? g.slideId,
+        })
+      );
+
+      setSlides(sanitizedSlides);
+      setGrammarChanges(sanitizedGrammar);
+      setActiveSlideIndex(0);
     } catch {
-      // Silently keep default slides on API failure
+      setGenerateError("Network error — please check your connection and try again.");
     } finally {
       setGenerateStep("done");
       setGenerating(false);
-      setActiveSlideIndex(0);
     }
   }
 
   function acceptGrammarChange(slideId: string) {
-    setGrammarChanges((prev) =>
-      prev.map((g) => (g.slideId === slideId ? { ...g, accepted: true } : g))
+    // Only act on the first unaccepted change for this slide (the one the user sees)
+    const change = grammarChanges.find(
+      (g) => g.slideId === slideId && !g.accepted
     );
-    const change = grammarChanges.find((g) => g.slideId === slideId);
-    if (change) {
-      setSlides((prev) =>
-        prev.map((s) => {
-          if (s.id !== slideId) return s;
-          const heading = s.content.heading?.replace(
-            change.original,
-            change.suggested
-          );
-          const body = s.content.body?.replace(
-            change.original,
-            change.suggested
-          );
-          return { ...s, content: { ...s.content, heading, body }, aiModified: true };
-        })
-      );
-    }
+    if (!change) return;
+
+    setGrammarChanges((prev) =>
+      prev.map((g) =>
+        g === change ? { ...g, accepted: true } : g
+      )
+    );
+    setSlides((prev) =>
+      prev.map((s) => {
+        if (s.id !== slideId) return s;
+        const heading = s.content.heading?.replace(change.original, change.suggested);
+        const body = s.content.body?.replace(change.original, change.suggested);
+        return { ...s, content: { ...s.content, heading, body }, aiModified: true };
+      })
+    );
   }
 
   function rejectGrammarChange(slideId: string) {
-    setGrammarChanges((prev) =>
-      prev.filter((g) => g.slideId !== slideId)
+    // Remove only the first unaccepted change for this slide
+    const change = grammarChanges.find(
+      (g) => g.slideId === slideId && !g.accepted
     );
+    if (!change) return;
+    setGrammarChanges((prev) => prev.filter((g) => g !== change));
   }
 
   if (loading) {
@@ -643,7 +667,7 @@ export default function SlidesPage() {
       {/* Generate Loading Modal */}
       {generating && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-bg-surface border border-border-subtle p-10 w-full max-w-sm flex flex-col items-center gap-6">
+          <div className="bg-bg-surface border border-border-subtle rounded-2xl p-10 w-full max-w-sm flex flex-col items-center gap-6">
             <div className="flex items-center justify-center">
               <div className="h-12 w-12 animate-spin rounded-full border-2 border-border-subtle border-t-accent" />
             </div>
@@ -655,9 +679,11 @@ export default function SlidesPage() {
             </div>
             <div className="w-full flex flex-col gap-2">
               {GENERATE_STEPS.map((step) => {
-                const currentIndex = GENERATE_STEPS.findIndex(
-                  (s) => s.key === generateStep
-                );
+                // "done" means all complete; use length so all steps are < it
+                const currentIndex =
+                  generateStep === "done"
+                    ? GENERATE_STEPS.length
+                    : GENERATE_STEPS.findIndex((s) => s.key === generateStep);
                 const stepIndex = GENERATE_STEPS.findIndex(
                   (s) => s.key === step.key
                 );
@@ -688,6 +714,20 @@ export default function SlidesPage() {
               })}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Error toast — shown after modal closes if generation failed */}
+      {generateError && !generating && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-lg border border-danger/25 bg-bg-surface max-w-sm w-full mx-4">
+          <AlertCircle className="h-4 w-4 text-danger shrink-0" />
+          <p className="text-sm text-text-primary flex-1">{generateError}</p>
+          <button
+            onClick={() => setGenerateError(null)}
+            className="text-text-muted hover:text-text-primary transition-colors shrink-0"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
     </div>
