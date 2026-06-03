@@ -2084,8 +2084,9 @@ function EnglishReaderView({
 interface PhraseRow {
   id: string;
   words: string[];
-  indent: number;      // 0–12, each level = 36px
-  verseLabel?: string; // shown as a small verse-number badge
+  x: number;          // px from canvas left
+  y: number;          // px from canvas top
+  verseLabel?: string;
 }
 
 /* Parse "Gen 5:8-13" / "John 3:16" / "1 Cor 13:1" etc. */
@@ -2105,12 +2106,16 @@ function parsePhraseRef(input: string): { book: string; ch: string; startV: numb
 
 function buildPhraseRows(book: string, ch: string, startV: number, endV: number, mode: TextMode): PhraseRow[] {
   const rows: PhraseRow[] = [];
+  let y = 20;
   for (let v = startV; v <= Math.min(endV, startV + 29); v++) {
     const text = getEnglishText(book, ch, String(v), mode);
     const words = text.split(/\s+/).filter(Boolean);
-    if (words.length) rows.push({ id: `${v}-${Date.now()}`, words, indent: 0, verseLabel: String(v) });
+    if (words.length) {
+      rows.push({ id: `${v}-${Date.now()}`, words, x: 24, y, verseLabel: String(v) });
+      y += 62;
+    }
   }
-  return rows.length ? rows : [{ id: "0", words: [], indent: 0 }];
+  return rows.length ? rows : [{ id: "0", words: [], x: 24, y: 20 }];
 }
 
 function PhraseBuilderView({
@@ -2125,24 +2130,18 @@ function PhraseBuilderView({
   const [activeLabel, setActiveLabel] = useState(initialLabel);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const rowRefs      = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Drag tracking (not state — avoids stale closures)
   const dragRef = useRef<{
     rowIdx: number; wordIdx: number;
     startX: number; startY: number;
     activated: boolean;
   } | null>(null);
-  const insertAtRef = useRef<number | null>(null);
 
-  // Visual drag state (triggers re-renders for ghost + indicator)
   const [dragView, setDragView] = useState<{
     rowIdx: number; wordIdx: number;
-    x: number; y: number; indent: number;
+    cursorX: number; cursorY: number;
   } | null>(null);
-  const [insertAt, setInsertAt] = useState<number | null>(null);
 
-  // Sync when the main nav changes
   useEffect(() => {
     const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
     setRefInput(label); setActiveLabel(label);
@@ -2160,15 +2159,6 @@ function PhraseBuilderView({
     setActiveLabel(`${BOOK_NAMES[parsed.book] || parsed.book} ${parsed.ch}:${parsed.startV}${end}`);
   }
 
-  function calcInsertAt(clientY: number, excludeIdx: number): number {
-    for (let i = 0; i < rows.length; i++) {
-      if (i === excludeIdx) continue;
-      const rect = rowRefs.current[i]?.getBoundingClientRect();
-      if (rect && clientY < rect.top + rect.height / 2) return i;
-    }
-    return rows.length;
-  }
-
   function onWordPointerDown(e: React.PointerEvent, rIdx: number, wIdx: number) {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -2182,13 +2172,7 @@ function PhraseBuilderView({
     const dy = e.clientY - d.startY;
     if (!d.activated && Math.sqrt(dx * dx + dy * dy) < 8) return;
     d.activated = true;
-    // Indent = cursor X position relative to container left edge (16px per step, up to 48 levels)
-    const cLeft = containerRef.current?.getBoundingClientRect().left ?? 0;
-    const indent = Math.max(0, Math.min(48, Math.round((e.clientX - cLeft - 8) / 16)));
-    const ia = calcInsertAt(e.clientY, rIdx);
-    insertAtRef.current = ia;
-    setInsertAt(ia);
-    setDragView({ rowIdx: rIdx, wordIdx: wIdx, x: e.clientX, y: e.clientY, indent });
+    setDragView({ rowIdx: rIdx, wordIdx: wIdx, cursorX: e.clientX, cursorY: e.clientY });
   }
 
   function onWordPointerUp(e: React.PointerEvent, rIdx: number, wIdx: number) {
@@ -2197,47 +2181,36 @@ function PhraseBuilderView({
     const wasActivated = d.activated;
     dragRef.current = null;
     const dv = dragView;
-    const ia = insertAtRef.current;
-    insertAtRef.current = null;
     setDragView(null);
-    setInsertAt(null);
     if (!wasActivated || !dv) return;
+
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const dropX = Math.max(0, e.clientX - rect.left);
+    const dropY = Math.max(0, e.clientY - rect.top + el.scrollTop);
 
     setRows(prev => {
       const next = [...prev];
       const row = next[rIdx];
-      let srcIdx = rIdx;
-
       if (dv.wordIdx > 0) {
-        // Split: words before cursor stay; words from cursor form a new row
         next[rIdx] = { ...row, words: row.words.slice(0, dv.wordIdx) };
-        next.splice(rIdx + 1, 0, { id: Date.now().toString(36), words: row.words.slice(dv.wordIdx), indent: dv.indent });
-        srcIdx = rIdx + 1;
+        next.push({ id: Date.now().toString(36), words: row.words.slice(dv.wordIdx), x: dropX, y: dropY });
       } else {
-        next[rIdx] = { ...row, indent: dv.indent };
+        next[rIdx] = { ...row, x: dropX, y: dropY };
       }
-
-      // Vertical reorder
-      if (ia !== null) {
-        const adjIa = (dv.wordIdx > 0 && ia > rIdx) ? ia + 1 : ia;
-        if (adjIa !== srcIdx && adjIa !== srcIdx + 1) {
-          const [item] = next.splice(srcIdx, 1);
-          const target = adjIa > srcIdx ? adjIa - 1 : adjIa;
-          next.splice(Math.max(0, Math.min(next.length, target)), 0, item);
-        }
-      }
-
       return next.filter(r => r.words.length > 0);
     });
   }
 
+  const canvasHeight = rows.reduce((m, r) => Math.max(m, r.y + 100), 600);
   const isEmpty = rows.every(r => r.words.length === 0);
 
   return (
-    <div ref={containerRef} className="w-full min-h-[calc(100vh-180px)] relative overflow-x-auto">
+    <div className="w-full flex flex-col" style={{ height: "calc(100vh - 160px)" }}>
 
       {/* ── Reference picker — compact strip ── */}
-      <div className="mb-6 flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap mb-4 shrink-0">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 shrink-0">
           <Columns2 className="h-3 w-3 text-accent" />
           <span className="text-xs font-semibold text-accent tracking-wide">{activeLabel}</span>
@@ -2247,7 +2220,7 @@ function PhraseBuilderView({
           onChange={e => { setRefInput(e.target.value); setRefError(""); }}
           onKeyDown={e => e.key === "Enter" && loadRef()}
           placeholder="Gen 5:8-13 or John 3:16-17"
-          className="h-7 w-52 bg-bg-elevated border border-border-subtle px-2.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
+          className="h-7 w-48 bg-bg-elevated border border-border-subtle px-2.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
         />
         <button onClick={loadRef} className="h-7 px-3 text-xs border border-border-subtle text-text-muted hover:border-accent hover:text-accent transition-colors rounded-lg shrink-0">Load</button>
         <button
@@ -2258,81 +2231,63 @@ function PhraseBuilderView({
             setRefError("");
           }}
           className="h-7 px-2 text-xs border border-border-subtle text-text-muted hover:text-text-primary transition-colors rounded-lg shrink-0"
-          title="Reset to current verse"
         >Reset</button>
         {refError && <span className="text-xs text-red-400">{refError}</span>}
-        <span className="text-[10px] text-text-muted opacity-30 ml-auto hidden sm:inline">drag any word → it + following words move freely</span>
       </div>
 
-      {/* ── Ghost overlay — floats words under cursor while dragging ── */}
+      {/* ── Ghost overlay ── */}
       {dragView && (() => {
         const ghostWords = rows[dragView.rowIdx]?.words.slice(dragView.wordIdx) ?? [];
         return (
           <div
             className="fixed pointer-events-none z-50 drop-shadow-2xl"
-            style={{ left: dragView.x - 20, top: dragView.y - 18, transform: "rotate(-0.4deg)" }}
+            style={{ left: dragView.cursorX - 14, top: dragView.cursorY - 16, transform: "rotate(-0.4deg)" }}
           >
-            <div className="flex flex-wrap gap-x-[0.35em] text-2xl font-serif text-text-primary/80 leading-relaxed">
+            <div className="flex flex-wrap gap-x-[0.4em] text-2xl font-serif text-text-primary/75 leading-snug">
               {ghostWords.map((w, i) => <span key={i}>{w}</span>)}
             </div>
           </div>
         );
       })()}
 
-      {isEmpty && (
-        <p className="text-sm text-text-muted opacity-60">No text found for this passage.</p>
-      )}
-
-      {/* ── Phrase canvas — full width, generous vertical space ── */}
-      <div className="flex flex-col gap-0 select-none" style={{ minWidth: "max-content" }}>
+      {/* ── Free-form canvas ── */}
+      <div
+        ref={containerRef}
+        className="relative flex-1 overflow-auto select-none rounded-xl border border-border-subtle/30"
+        style={{ minHeight: `${canvasHeight}px` }}
+      >
+        {isEmpty && (
+          <p className="absolute top-8 left-6 text-sm text-text-muted opacity-40">No text found for this passage.</p>
+        )}
         {rows.map((row, rIdx) => (
-          <div key={row.id}>
-
-            {/* Drop indicator above row */}
-            {insertAt === rIdx && dragView && dragView.rowIdx !== rIdx && (
-              <div className="relative h-px my-1 overflow-visible" style={{ minWidth: "100vw" }}>
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-accent to-transparent" />
-                <div className="absolute inset-0 bg-accent/50 blur-sm" />
-              </div>
+          <div
+            key={row.id}
+            className="absolute flex flex-wrap items-baseline gap-x-[0.4em] gap-y-0"
+            style={{
+              left: row.x,
+              top: row.y,
+              opacity: dragView?.rowIdx === rIdx ? 0.1 : 1,
+              transition: "opacity 80ms",
+            }}
+          >
+            {row.verseLabel && (
+              <span className="text-[9px] font-bold text-accent/40 mr-0.5 self-center select-none tabular-nums">
+                {row.verseLabel}
+              </span>
             )}
-
-            <div
-              ref={el => { rowRefs.current[rIdx] = el; }}
-              className="flex flex-wrap items-baseline gap-x-[0.4em] gap-y-0 py-1.5 leading-loose transition-opacity duration-75"
-              style={{
-                paddingLeft: `${row.indent * 16 + 8}px`,
-                opacity: dragView?.rowIdx === rIdx ? 0.1 : 1,
-              }}
-            >
-              {/* Verse label */}
-              {row.verseLabel && (
-                <span className="text-[9px] font-bold text-accent/40 w-4 text-right shrink-0 self-center select-none tabular-nums">
-                  {row.verseLabel}
-                </span>
-              )}
-
-              {row.words.map((word, wIdx) => (
-                <span
-                  key={wIdx}
-                  className="cursor-phrase text-2xl font-serif hover:text-accent/70 transition-colors duration-75 touch-none"
-                  onPointerDown={e => onWordPointerDown(e, rIdx, wIdx)}
-                  onPointerMove={e => onWordPointerMove(e, rIdx, wIdx)}
-                  onPointerUp={e => onWordPointerUp(e, rIdx, wIdx)}
-                >
-                  {word}
-                </span>
-              ))}
-            </div>
+            {row.words.map((word, wIdx) => (
+              <span
+                key={wIdx}
+                className="cursor-phrase text-2xl font-serif hover:text-accent/70 transition-colors duration-75 touch-none leading-snug"
+                onPointerDown={e => onWordPointerDown(e, rIdx, wIdx)}
+                onPointerMove={e => onWordPointerMove(e, rIdx, wIdx)}
+                onPointerUp={e => onWordPointerUp(e, rIdx, wIdx)}
+              >
+                {word}
+              </span>
+            ))}
           </div>
         ))}
-
-        {/* Drop indicator at bottom */}
-        {insertAt === rows.length && dragView && (
-          <div className="relative h-px my-1 overflow-visible">
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-accent to-transparent" />
-            <div className="absolute inset-0 bg-accent/50 blur-sm" />
-          </div>
-        )}
       </div>
     </div>
   );
