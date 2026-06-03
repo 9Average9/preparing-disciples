@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, GripVertical, Columns2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
@@ -926,6 +926,8 @@ export default function RhemaPage() {
     return 3;
   });
   const [showFontPicker, setShowFontPicker] = useState(false);
+  const [englishMode, setEnglishMode] = useState(false);
+  const [phraseBuilderMode, setPhraseBuilderMode] = useState(false);
   const loadingRef = useRef(false);
 
   // Navigation history (persisted in localStorage)
@@ -1182,7 +1184,7 @@ export default function RhemaPage() {
   const variantSet  = loaded ? getVariantSet(book, chapter, verse, textMode) : new Set<number>();
   const crossRefs   = loaded ? (window.RhemaCrossRefs?.[`${book} ${chapter}:${verse}`] || null) : null;
   const hasCrossRefs = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
-  const hasActiveMode = syntaxMode || fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0 || (isHebrew && hebrewMode);
+  const hasActiveMode = syntaxMode || fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0 || (isHebrew && hebrewMode) || englishMode || phraseBuilderMode;
 
   /* POS categories present in the current verse */
   const versePosCats = useMemo(() => {
@@ -1355,6 +1357,34 @@ export default function RhemaPage() {
 
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
+          {/* English-only reader */}
+          <button
+            onClick={() => { setEnglishMode(v => !v); setPhraseBuilderMode(false); setSyntaxMode(false); }}
+            title="English-only reader (BSB / MSB)"
+            className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors rounded-lg",
+              englishMode
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+            )}
+          >
+            <AlignLeft className="h-3 w-3" />
+            <span className="text-[10px] hidden sm:inline">English</span>
+          </button>
+
+          {/* Phrase / sentence structure builder */}
+          <button
+            onClick={() => { setPhraseBuilderMode(v => !v); setEnglishMode(false); setSyntaxMode(false); setFullChapter(false); }}
+            title="Phrase structure builder"
+            className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors rounded-lg",
+              phraseBuilderMode
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+            )}
+          >
+            <Columns2 className="h-3 w-3" />
+            <span className="text-[10px] hidden sm:inline">Phrase</span>
+          </button>
+
           {/* Font size picker */}
           <div className="relative z-[39]">
             <button
@@ -1470,6 +1500,17 @@ export default function RhemaPage() {
               book={book} chapter={chapter} verse={verse} textMode={textMode}
               onPhraseClick={(p) => { setSelectedSxPhrase(p); setActiveWord(null); setShowCrossRefs(false); setShowNotes(false); setShowLibrary(false); }}
               englishText={englishText} englishLabel={getEnglishLabel(textMode)}
+            />
+          ) : englishMode ? (
+            <EnglishReaderView
+              book={book} chapter={chapter} verse={verse}
+              textMode={textMode} fullChapter={fullChapter} fontSize={fontSize}
+              englishLabel={getEnglishLabel(textMode)}
+              onTextModeToggle={() => setTextMode(m => m === "critical" ? "majority" : "critical")}
+            />
+          ) : phraseBuilderMode ? (
+            <PhraseBuilderView
+              book={book} chapter={chapter} verse={verse} textMode={textMode}
             />
           ) : fullChapter ? (
             <ChapterView
@@ -1987,6 +2028,231 @@ function ChapterView({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* ── EnglishReaderView ──────────────────────────────────────── */
+function EnglishReaderView({
+  book, chapter, verse, textMode, fullChapter, fontSize, englishLabel, onTextModeToggle,
+}: {
+  book: string; chapter: string; verse: string; textMode: TextMode;
+  fullChapter: boolean; fontSize: FontSize; englishLabel: string;
+  onTextModeToggle: () => void;
+}) {
+  const bookName = BOOK_NAMES[book] || book;
+  const chapters = getChapters(book, textMode);
+  const verses   = fullChapter ? getVerses(book, chapter, textMode) : [verse];
+
+  const lineSize = fontSize === 1 ? "text-base" : fontSize === 2 ? "text-lg" : fontSize === 3 ? "text-xl" : fontSize === 4 ? "text-2xl" : "text-3xl";
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20">
+          <span className="text-xs font-semibold text-accent tracking-wide">
+            {bookName} {chapter}{fullChapter ? "" : `:${verse}`}
+          </span>
+          <span className="text-[10px] text-accent/60">{englishLabel}</span>
+        </div>
+        <button
+          onClick={onTextModeToggle}
+          className="text-[10px] px-2.5 py-1 border border-border-subtle rounded-lg text-text-muted hover:text-text-primary hover:border-[#3a4052] transition-colors"
+        >
+          Switch to {textMode === "critical" ? "MSB" : "BSB"}
+        </button>
+      </div>
+
+      {/* Verse text */}
+      {verses.map(v => {
+        const text = getEnglishText(book, chapter, v, textMode);
+        return (
+          <p key={v} className={cn(lineSize, "text-text-primary leading-relaxed mb-4")}>
+            {fullChapter && (
+              <span className="text-xs font-bold text-accent mr-2 select-none align-super">{v}</span>
+            )}
+            {text || <em className="text-text-muted opacity-50 text-base">No translation available for this passage.</em>}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── PhraseBuilderView ──────────────────────────────────────── */
+interface PhraseRow {
+  id: string;
+  words: string[];
+  indent: number; // 0–10, each level = 36px
+}
+
+function PhraseBuilderView({
+  book, chapter, verse, textMode,
+}: {
+  book: string; chapter: string; verse: string; textMode: TextMode;
+}) {
+  const engText = getEnglishText(book, chapter, verse, textMode);
+  const sourceWords = engText.split(/\s+/).filter(Boolean);
+
+  const makeRows = (): PhraseRow[] => [{ id: "0", words: sourceWords, indent: 0 }];
+  const [rows, setRows] = useState<PhraseRow[]>(makeRows);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  // Reset when passage changes
+  useEffect(() => {
+    const words = getEnglishText(book, chapter, verse, textMode).split(/\s+/).filter(Boolean);
+    setRows([{ id: Date.now().toString(), words, indent: 0 }]);
+  }, [book, chapter, verse, textMode]);
+
+  function splitAt(rowIdx: number, wordIdx: number) {
+    if (wordIdx === 0) return;
+    setRows(prev => {
+      const row = prev[rowIdx];
+      const before: PhraseRow = { ...row, words: row.words.slice(0, wordIdx) };
+      const after: PhraseRow  = { id: Date.now().toString(), words: row.words.slice(wordIdx), indent: row.indent + 1 };
+      const next = [...prev];
+      next.splice(rowIdx, 1, before, after);
+      return next;
+    });
+  }
+
+  function mergeUp(rowIdx: number) {
+    if (rowIdx === 0) return;
+    setRows(prev => {
+      const next = [...prev];
+      const merged: PhraseRow = { ...next[rowIdx - 1], words: [...next[rowIdx - 1].words, ...next[rowIdx].words] };
+      next.splice(rowIdx - 1, 2, merged);
+      return next;
+    });
+  }
+
+  function adjustIndent(rowIdx: number, dir: -1 | 1) {
+    setRows(prev => {
+      const next = [...prev];
+      next[rowIdx] = { ...next[rowIdx], indent: Math.max(0, Math.min(10, next[rowIdx].indent + dir)) };
+      return next;
+    });
+  }
+
+  function onDrop(targetIdx: number) {
+    if (dragIdx === null || dragIdx === targetIdx) { setDragIdx(null); setDragOver(null); return; }
+    setRows(prev => {
+      const next = [...prev];
+      const [item] = next.splice(dragIdx, 1);
+      next.splice(dragIdx < targetIdx ? targetIdx - 1 : targetIdx, 0, item);
+      return next;
+    });
+    setDragIdx(null); setDragOver(null);
+  }
+
+  const bookName = BOOK_NAMES[book] || book;
+
+  if (!sourceWords.length) {
+    return <p className="text-sm text-text-muted opacity-60">No English text available for this verse.</p>;
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20">
+          <span className="text-xs font-semibold text-accent tracking-wide">{bookName} {chapter}:{verse}</span>
+          <span className="text-[10px] text-accent/60">Phrase Structure</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <p className="text-[10px] text-text-muted opacity-60 hidden sm:block">
+            Click any word to split there · drag rows to reorder · ← → to indent
+          </p>
+          <button
+            onClick={() => setRows(makeRows())}
+            className="text-[10px] px-2.5 py-1 border border-border-subtle rounded-lg text-text-muted hover:text-text-primary hover:border-[#3a4052] transition-colors"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {/* Phrase rows */}
+      <div className="flex flex-col gap-0.5 select-none font-serif">
+        {rows.map((row, rIdx) => (
+          <div
+            key={row.id}
+            draggable
+            onDragStart={() => setDragIdx(rIdx)}
+            onDragOver={e => { e.preventDefault(); setDragOver(rIdx); }}
+            onDrop={() => onDrop(rIdx)}
+            onDragEnd={() => { setDragIdx(null); setDragOver(null); }}
+            className={cn(
+              "flex items-center gap-1.5 py-1.5 rounded-lg transition-all group",
+              dragIdx === rIdx && "opacity-30",
+              dragOver === rIdx && dragIdx !== rIdx && "border-t-2 border-accent"
+            )}
+            style={{ paddingLeft: `${row.indent * 36 + 4}px` }}
+          >
+            {/* Drag handle */}
+            <GripVertical className="h-4 w-4 text-text-muted opacity-0 group-hover:opacity-30 cursor-grab shrink-0" />
+
+            {/* Indent controls */}
+            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-60 shrink-0">
+              <button
+                onClick={() => adjustIndent(rIdx, -1)}
+                disabled={row.indent === 0}
+                className="h-5 w-5 flex items-center justify-center text-[10px] text-text-muted hover:text-text-primary disabled:opacity-20 rounded hover:bg-bg-elevated"
+                title="Dedent"
+              >←</button>
+              <button
+                onClick={() => adjustIndent(rIdx, 1)}
+                className="h-5 w-5 flex items-center justify-center text-[10px] text-text-muted hover:text-text-primary rounded hover:bg-bg-elevated"
+                title="Indent"
+              >→</button>
+            </div>
+
+            {/* Words */}
+            <div className="flex flex-wrap gap-x-[0.3em] gap-y-1 items-baseline">
+              {row.words.map((word, wIdx) => {
+                const isFirstOfRow = wIdx === 0;
+                const canMerge = isFirstOfRow && rIdx > 0;
+                const canSplit = !isFirstOfRow;
+                return (
+                  <button
+                    key={wIdx}
+                    onClick={() => canSplit ? splitAt(rIdx, wIdx) : canMerge ? mergeUp(rIdx) : undefined}
+                    title={canSplit ? "Split here → new row below" : canMerge ? "Merge with row above" : ""}
+                    className={cn(
+                      "text-xl leading-snug transition-colors",
+                      canSplit && "hover:text-accent cursor-pointer hover:underline decoration-accent/50",
+                      canMerge && "hover:text-red-400 cursor-pointer",
+                      !canSplit && !canMerge && "cursor-default text-text-primary"
+                    )}
+                    style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+                  >
+                    {word}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Merge-up button (visible on hover for non-first rows) */}
+            {rIdx > 0 && (
+              <button
+                onClick={() => mergeUp(rIdx)}
+                className="opacity-0 group-hover:opacity-40 text-[10px] text-text-muted hover:text-red-400 ml-2 shrink-0 transition-all"
+                title="Merge this row with the one above"
+              >↑ merge</button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Legend */}
+      <div className="mt-8 pt-4 border-t border-border-subtle/40 flex flex-wrap gap-4 text-[10px] text-text-muted opacity-60">
+        <span><span className="text-accent">click word</span> → split / start new row below</span>
+        <span><span className="text-red-400">click 1st word</span> → merge with row above</span>
+        <span><span className="text-text-primary">drag row</span> → reorder</span>
+        <span><span className="text-text-primary">← →</span> → indent level</span>
+      </div>
     </div>
   );
 }
