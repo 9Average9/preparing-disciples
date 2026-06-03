@@ -28,7 +28,7 @@ declare global {
     RhemaCrossRefLabels?: string[];
     RhemaSyntax?: Record<string, Record<string, Record<string, Array<[number, number, string]>>>>;
     /* Hebrew */
-    RhemaOTHebrew?: { books: string[]; names: Record<string,string>; text: Record<string,Record<string,Record<string,Array<[string,number,string]>>>> };
+    RhemaHebrewOT?: { books: string[]; names: Record<string,string>; text: Record<string,Record<string,Record<string,Array<[string,number,string]>>>> };
     RhemaHebrewLexicon?: Record<number, HebrewLexEntry>;
   }
 }
@@ -72,6 +72,7 @@ const DATA_FILES_CORE = [
   "rhema-lexicon.js", "rhema-mm.js", "rhema-msb.js",
   "rhema-bsb.js", "rhema-syntax.js", "rhema-crossrefs.js",
 ];
+const HEBREW_BASE = "https://raw.githubusercontent.com/9Average9/Greek-Vocab/main/";
 const DATA_FILES_HEBREW = ["rhema-ot-hebrew.js", "rhema-hebrew-lexicon.js"];
 
 const CROSS_REF_LABELS: Record<string, string> = {
@@ -127,8 +128,8 @@ function getText(mode: TextMode) {
 }
 
 function getWords(book: string, ch: string, v: string, mode: TextMode, hebrew = false): Word[] {
-  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
-    return window.RhemaOTHebrew.text[book]?.[ch]?.[v] || [];
+  if (hebrew && isOTBook(book) && window.RhemaHebrewOT) {
+    return window.RhemaHebrewOT.text[book]?.[ch]?.[v] || [];
   }
   return getText(mode)[book]?.[ch]?.[v] || [];
 }
@@ -143,9 +144,9 @@ function getEnglishLabel(mode: TextMode) {
 }
 
 function getBookOrder(mode: TextMode, hebrew = false): string[] {
-  if (hebrew && window.RhemaOTHebrew) {
+  if (hebrew && window.RhemaHebrewOT) {
     const ntText = getText(mode);
-    const otBooks = OT_BOOK_ORDER.filter(b => window.RhemaOTHebrew!.text[b]);
+    const otBooks = OT_BOOK_ORDER.filter(b => window.RhemaHebrewOT!.text[b]);
     const ntBooks = NT_BOOK_ORDER.filter(b => ntText[b]);
     return [...otBooks, ...ntBooks];
   }
@@ -154,8 +155,8 @@ function getBookOrder(mode: TextMode, hebrew = false): string[] {
 }
 
 function getChapters(book: string, mode: TextMode, hebrew = false): string[] {
-  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
-    const chObj = window.RhemaOTHebrew.text[book] || {};
+  if (hebrew && isOTBook(book) && window.RhemaHebrewOT) {
+    const chObj = window.RhemaHebrewOT.text[book] || {};
     return Object.keys(chObj).sort((a, b) => Number(a) - Number(b));
   }
   const chObj = getText(mode)[book] || {};
@@ -163,8 +164,8 @@ function getChapters(book: string, mode: TextMode, hebrew = false): string[] {
 }
 
 function getVerses(book: string, ch: string, mode: TextMode, hebrew = false): string[] {
-  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
-    const vObj = window.RhemaOTHebrew.text[book]?.[ch] || {};
+  if (hebrew && isOTBook(book) && window.RhemaHebrewOT) {
+    const vObj = window.RhemaHebrewOT.text[book]?.[ch] || {};
     return Object.keys(vObj).sort((a, b) => Number(a) - Number(b));
   }
   const vObj = getText(mode)[book]?.[ch] || {};
@@ -184,7 +185,7 @@ function isOTBook(book: string): boolean {
 }
 
 function hebrewAvailable(): boolean {
-  return !!(window.RhemaOTHebrew && window.RhemaHebrewLexicon);
+  return !!(window.RhemaHebrewOT && window.RhemaHebrewLexicon);
 }
 
 function getQuickDef(lex: LexEntry): string {
@@ -212,6 +213,13 @@ function eng3sg(v: string): string {
   if (!v) return v;
   if (/(?:s|sh|ch|x|z)$/.test(v)) return v + "es";
   if (/[^aeiou]y$/.test(v)) return v.slice(0, -1) + "ies";
+  return v + "s";
+}
+function engPlural(v: string): string {
+  if (!v) return v;
+  if (/(?:s|sh|ch|x|z)$/.test(v)) return v + "es";
+  if (/[^aeiou]y$/.test(v)) return v.slice(0, -1) + "ies";
+  if (/fe?$/.test(v)) return v.replace(/fe?$/, "ves");
   return v + "s";
 }
 
@@ -251,7 +259,7 @@ function verbGloss(morph: string, brief: string): string {
   return subj ? `${subj}${modal} ${conjugated}` : `${modal.trim()} ${conjugated}`.trim();
 }
 
-/* Case-inflected gloss for nouns/pronouns/adjectives: "of God", "to/for God" */
+/* Case-inflected gloss for nouns/pronouns/adjectives: "of God", "to/for God", "words" */
 function nounGloss(morph: string, brief: string): string {
   const base = brief.split(",")[0].split(";")[0].trim();
   if (!base || !morph) return base;
@@ -262,19 +270,26 @@ function nounGloss(morph: string, brief: string): string {
   if (!cng) return base;
   if (["PRI", "NUI", "LI", "OI"].includes(cng)) return base;
   let caseCode: string;
+  let numberCode = "";
   if (posRaw === "P") {
     caseCode = cng[0] === "1" || cng[0] === "2" ? cng[1] : cng[0];
   } else if (posRaw === "F") {
     caseCode = cng[1];
+    numberCode = cng[2] || "";
   } else if (posRaw === "S") {
     caseCode = cng[2];
   } else {
     caseCode = cng[0];
+    numberCode = cng[1] || "";
   }
+  const isPlural = numberCode === "P";
+  const firstWord = base.split(" ")[0];
+  const rest = base.includes(" ") ? base.slice(base.indexOf(" ")) : "";
+  const displayBase = isPlural ? engPlural(firstWord) + rest : base;
   const CASE_PREP: Record<string, string> = { N: "", G: "of ", D: "to/for ", A: "", V: "O " };
   const prep = CASE_PREP[caseCode];
-  if (prep === undefined) return base;
-  return prep ? `${prep}${base}` : base;
+  if (prep === undefined) return displayBase;
+  return prep ? `${prep}${displayBase}` : displayBase;
 }
 
 /* Unified word gloss: routes to verb or noun function based on morph code */
@@ -285,12 +300,61 @@ function getWordGloss(lex: LexEntry, morph: string): string {
   return nounGloss(morph, brief);
 }
 
+/* Hebrew inflected gloss: construct → "of X", plural → "Xs", perfect/imperfect → "he/she Xed" */
+function getHebrewWordGloss(lex: HebrewLexEntry, morph: string): string {
+  const src = lex.brief || lex.kjv_def || lex.strongs_def || "";
+  const base = src.replace(/<[^>]+>/g, "").split(/[,;]/)[0].trim().replace(/^to /, "").trim();
+  if (!base || !morph) return base;
+  // Strip H prefix + compound prefix (e.g. "HVqp3ms" → "Vqp3ms", "HR/Ncfsa" → "Ncfsa")
+  let m = morph.startsWith("H") ? morph.slice(1) : morph;
+  if (m.includes("/")) m = m.split("/").pop()!;
+  const pos = m[0];
+  if (pos === "V") {
+    const form = m[2] || "";
+    const person = m[3] || "";
+    const gender = m[4] || "";
+    const number = m[5] || "";
+    if (form === "c" || form === "a") return `to ${base}`;
+    if (form === "r") return engIng(base);
+    if (form === "s") return `${engIng(base)} (pass.)`;
+    if (form === "v") return `${base}!`;
+    const SUBJ: Record<string, string> = {
+      "1ms": "I", "1fs": "I", "1cs": "I",
+      "1mp": "we", "1fp": "we", "1cp": "we",
+      "2ms": "you", "2fs": "you", "2mp": "you all", "2fp": "you all",
+      "3ms": "he", "3fs": "she", "3cs": "he/she",
+      "3mp": "they", "3fp": "they", "3cp": "they",
+    };
+    const subj = SUBJ[`${person}${gender}${number}`] || "";
+    if (form === "p" || form === "w") return subj ? `${subj} ${engPast(base)}` : engPast(base);
+    if (form === "q") return subj ? `${subj} will ${base}` : `will ${base}`;
+    return subj ? `${subj} ${base}` : base;
+  }
+  if (pos === "N") {
+    const number = m[3] || "";
+    const state = m[4] || "";
+    const isPlural = number === "p" || number === "d";
+    const firstWord = base.split(" ")[0];
+    const rest = base.includes(" ") ? base.slice(base.indexOf(" ")) : "";
+    const displayBase = isPlural ? engPlural(firstWord) + rest : base;
+    return state === "c" ? `of ${displayBase}` : displayBase;
+  }
+  if (pos === "A") {
+    const number = m[3] || "";
+    const isPlural = number === "p";
+    const firstWord = base.split(" ")[0];
+    const rest = base.includes(" ") ? base.slice(base.indexOf(" ")) : "";
+    return isPlural ? engPlural(firstWord) + rest : base;
+  }
+  return base;
+}
+
 function getOccurrences(strongs: number, mode: TextMode, hebrew = false): { total: number; books: Record<string, number> } {
   const result: Record<string, number> = {};
   let total = 0;
-  if (hebrew && window.RhemaOTHebrew) {
-    for (const book of (window.RhemaOTHebrew.books || OT_BOOK_ORDER)) {
-      const bookText = window.RhemaOTHebrew.text[book] || {};
+  if (hebrew && window.RhemaHebrewOT) {
+    for (const book of (window.RhemaHebrewOT.books || OT_BOOK_ORDER)) {
+      const bookText = window.RhemaHebrewOT.text[book] || {};
       let count = 0;
       for (const ch of Object.keys(bookText)) {
         for (const v of Object.keys(bookText[ch])) {
@@ -817,6 +881,16 @@ function sxBuildTree(words: Word[], book: string, chapter: string, verse: string
   return { tree, cats };
 }
 
+/* ── Font size config ───────────────────────────────────────── */
+type FontSize = 1 | 2 | 3 | 4 | 5;
+const FS_CONFIG: Record<FontSize, { chip: string; gloss: string; english: string }> = {
+  1: { chip: "text-xl",  gloss: "text-[9px]",  english: "text-sm" },
+  2: { chip: "text-2xl", gloss: "text-[10px]", english: "text-base" },
+  3: { chip: "text-3xl", gloss: "text-xs",     english: "text-lg" },
+  4: { chip: "text-4xl", gloss: "text-sm",     english: "text-xl" },
+  5: { chip: "text-5xl", gloss: "text-base",   english: "text-2xl" },
+};
+
 /* ── Main component ─────────────────────────────────────────── */
 export default function RhemaPage() {
   const { user } = useAuthContext();
@@ -841,6 +915,14 @@ export default function RhemaPage() {
   const [syntaxMode, setSyntaxMode] = useState(false);
   const [selectedSxPhrase, setSelectedSxPhrase] = useState<SxPhrase | null>(null);
   const [, forceUpdate] = useState(0);
+  const [fontSize, setFontSize] = useState<FontSize>(() => {
+    if (typeof window !== "undefined") {
+      const s = localStorage.getItem("rhema-font-size");
+      if (s) return Math.max(1, Math.min(5, Number(s))) as FontSize;
+    }
+    return 3;
+  });
+  const [showFontPicker, setShowFontPicker] = useState(false);
   const loadingRef = useRef(false);
 
   // Navigation history (persisted in localStorage)
@@ -917,11 +999,11 @@ export default function RhemaPage() {
       s.onerror = () => { if (!failed) { failed = true; setLoadError(true); } };
       document.head.appendChild(s);
     }
-    // Hebrew files load silently — app works without them
+    // Hebrew files load from GitHub — app works without them if unavailable
     let hebrewCount = 0;
     for (const file of DATA_FILES_HEBREW) {
       const s = document.createElement("script");
-      s.src = `${STORAGE_BASE}${encodeURIComponent(file)}?alt=media`;
+      s.src = `${HEBREW_BASE}${file}`;
       s.onload = () => {
         hebrewCount++;
         if (hebrewCount === DATA_FILES_HEBREW.length) forceUpdate(n => n + 1);
@@ -1250,6 +1332,37 @@ export default function RhemaPage() {
 
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
+          {/* Font size picker */}
+          <div className="relative z-[39]">
+            <button
+              onClick={() => setShowFontPicker(v => !v)}
+              title="Font size"
+              className={cn("h-7 px-2 flex items-center gap-1 border transition-colors rounded-lg",
+                showFontPicker
+                  ? "border-accent text-accent bg-accent/10"
+                  : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+              )}
+            >
+              <span className="text-[11px] font-bold tracking-tight">Aa</span>
+            </button>
+            {showFontPicker && (
+              <div className="absolute right-0 top-full mt-1 bg-bg-surface border border-border-subtle rounded-xl shadow-2xl z-50 p-2 flex flex-col gap-1 min-w-[110px]">
+                {([1,2,3,4,5] as FontSize[]).map(sz => (
+                  <button
+                    key={sz}
+                    onClick={() => { setFontSize(sz); localStorage.setItem("rhema-font-size", String(sz)); setShowFontPicker(false); }}
+                    className={cn("flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-left transition-colors",
+                      fontSize === sz ? "bg-accent/20 text-accent" : "hover:bg-bg-elevated text-text-muted"
+                    )}
+                  >
+                    <span className={cn("font-serif", sz === 1 ? "text-xs" : sz === 2 ? "text-sm" : sz === 3 ? "text-base" : sz === 4 ? "text-lg" : "text-xl")}>Aa</span>
+                    <span className="text-[10px] font-medium">{sz === 1 ? "XS" : sz === 2 ? "S" : sz === 3 ? "M" : sz === 4 ? "L" : "XL"}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Modes wand */}
           <div className="relative z-[39]">
             <button
@@ -1343,6 +1456,7 @@ export default function RhemaPage() {
               isHebrew={isHebrew}
               onWordClick={(w) => { setActiveWord(w); setActiveTab("parsing"); closeAllPanels(); setActiveWord(w); }}
               englishLabel={getEnglishLabel(textMode)}
+              fontSize={fontSize}
             />
           ) : (
             <VerseView
@@ -1353,6 +1467,7 @@ export default function RhemaPage() {
               onWordClick={(w) => { setActiveWord(w); setActiveTab("parsing"); closeAllPanels(); setActiveWord(w); }}
               englishText={englishText}
               englishLabel={getEnglishLabel(textMode)}
+              fontSize={fontSize}
             />
           )}
         </div>
@@ -1504,6 +1619,10 @@ export default function RhemaPage() {
       {/* ── Wand popup backdrop ── */}
       {showWandPopup && (
         <div className="fixed inset-0 z-[38]" onClick={() => setShowWandPopup(false)} />
+      )}
+      {/* ── Font picker backdrop ── */}
+      {showFontPicker && (
+        <div className="fixed inset-0 z-[38]" onClick={() => setShowFontPicker(false)} />
       )}
 
       {/* ── Grammar examples modal ── */}
@@ -1734,7 +1853,7 @@ function GrammarExamplesModal({ category, value, onClose }: {
 /* ── VerseView ──────────────────────────────────────────────── */
 function VerseView({
   book, chapter, verse, textMode, greekOnly, showEnglish,
-  activeWord, activeHighlights, variantSet, isHebrew, onWordClick, englishText, englishLabel,
+  activeWord, activeHighlights, variantSet, isHebrew, onWordClick, englishText, englishLabel, fontSize,
 }: {
   book: string; chapter: string; verse: string; textMode: TextMode;
   greekOnly: boolean; showEnglish: boolean; activeWord: Word | null;
@@ -1742,6 +1861,7 @@ function VerseView({
   isHebrew: boolean;
   onWordClick: (w: Word) => void;
   englishText: string; englishLabel: string;
+  fontSize: FontSize;
 }) {
   const words = getWords(book, chapter, verse, textMode, isHebrew);
   const ref = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
@@ -1767,6 +1887,7 @@ function VerseView({
               isVariant={!isHebrew && variantSet.has(i)}
               highlightConfig={hlConfig ?? null}
               isHebrew={isHebrew}
+              fontSize={fontSize}
               onClick={() => onWordClick(w)}
             />
           );
@@ -1775,7 +1896,7 @@ function VerseView({
       {!greekOnly && showEnglish && (
         <div className="border-t border-border-subtle pt-5 mt-2">
           <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-2">{englishLabel}</p>
-          <p className="text-base text-text-muted leading-relaxed">
+          <p className={cn(FS_CONFIG[fontSize].english, "text-text-muted leading-relaxed")}>
             {englishText || <em className="opacity-50">Not included in this translation.</em>}
           </p>
         </div>
@@ -1787,13 +1908,14 @@ function VerseView({
 /* ── ChapterView ────────────────────────────────────────────── */
 function ChapterView({
   book, chapter, verse: targetVerse, textMode, greekOnly, showEnglish,
-  activeWord, activeHighlights, isHebrew, onWordClick, englishLabel,
+  activeWord, activeHighlights, isHebrew, onWordClick, englishLabel, fontSize,
 }: {
   book: string; chapter: string; verse: string; textMode: TextMode;
   greekOnly: boolean; showEnglish: boolean; activeWord: Word | null;
   activeHighlights: Set<string>; isHebrew: boolean;
   onWordClick: (w: Word) => void;
   englishLabel: string;
+  fontSize: FontSize;
 }) {
   const verses = getVerses(book, chapter, textMode, isHebrew);
   const bookName = BOOK_NAMES[book] || book;
@@ -1827,13 +1949,14 @@ function ChapterView({
                     isVariant={variantSet.has(i)}
                     highlightConfig={hlConfig ?? null}
                     isHebrew={isHebrew}
+                    fontSize={fontSize}
                     onClick={() => onWordClick(w)}
                   />
                 );
               })}
             </div>
             {!greekOnly && showEnglish && (
-              <p className="text-sm text-text-muted leading-relaxed mt-3 pl-4 border-l border-border-subtle">
+              <p className={cn(FS_CONFIG[fontSize].english, "text-text-muted leading-relaxed mt-3 pl-4 border-l border-border-subtle")}>
                 {engText || ""}
                 {engText && <span className="text-xs text-text-muted opacity-50 ml-2">{englishLabel}</span>}
               </p>
@@ -1849,24 +1972,25 @@ function ChapterView({
 type CategoryStyle = typeof CATEGORY_CONFIG[string];
 
 function WordChip({
-  word, greekOnly, active, isVariant, highlightConfig, isHebrew, onClick,
+  word, greekOnly, active, isVariant, highlightConfig, isHebrew, fontSize, onClick,
 }: {
   word: Word; greekOnly: boolean; active: boolean;
   isVariant: boolean;
   highlightConfig: CategoryStyle | null;
   isHebrew?: boolean;
+  fontSize: FontSize;
   onClick: () => void;
 }) {
   const [surface, strongs, morph] = word;
   const gloss = isHebrew
-    ? (getHebrewLex(strongs).translit || "")
+    ? getHebrewWordGloss(getHebrewLex(strongs), morph)
     : getWordGloss(getLex(strongs), morph);
 
   return (
     <button
       onClick={onClick}
       className={cn(
-        "relative flex flex-col items-center gap-1 px-2 py-1.5 border transition-colors duration-100 group rounded-lg",
+        "relative flex flex-col items-center gap-1 px-2 pt-1.5 pb-3 border transition-colors duration-100 group rounded-lg",
         active
           ? "border-accent bg-accent/10"
           : highlightConfig
@@ -1879,7 +2003,7 @@ function WordChip({
       )}
       <span
         className={cn(
-          "text-2xl leading-tight select-none",
+          FS_CONFIG[fontSize].chip, "leading-tight select-none",
           active ? "text-accent"
             : highlightConfig ? highlightConfig.text
             : "text-text-primary group-hover:text-accent"
@@ -1895,7 +2019,7 @@ function WordChip({
         {surface}
       </span>
       {!greekOnly && gloss && (
-        <span className={cn("text-[10px] leading-none max-w-[90px] truncate",
+        <span className={cn(FS_CONFIG[fontSize].gloss, "leading-tight text-center whitespace-normal max-w-[110px]",
           highlightConfig ? highlightConfig.text + " opacity-80" : "text-text-muted")}>
           {gloss}
         </span>
@@ -2233,8 +2357,8 @@ function BookOccurrences({ book, strongs, textMode, isHebrew, onNavigate }: {
   book: string; strongs: number; textMode: TextMode; isHebrew: boolean;
   onNavigate: (ch: string, v: string) => void;
 }) {
-  const bookText = isHebrew && window.RhemaOTHebrew
-    ? (window.RhemaOTHebrew.text[book] || {})
+  const bookText = isHebrew && window.RhemaHebrewOT
+    ? (window.RhemaHebrewOT.text[book] || {})
     : (getText(textMode)[book] || {});
   const scriptFont = isHebrew
     ? "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif"
