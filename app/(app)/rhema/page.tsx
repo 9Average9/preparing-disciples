@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, GripVertical, Columns2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, Columns2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
@@ -2084,7 +2084,33 @@ function EnglishReaderView({
 interface PhraseRow {
   id: string;
   words: string[];
-  indent: number; // 0–10, each level = 36px
+  indent: number;      // 0–12, each level = 36px
+  verseLabel?: string; // shown as a small verse-number badge
+}
+
+/* Parse "Gen 5:8-13" / "John 3:16" / "1 Cor 13:1" etc. */
+function parsePhraseRef(input: string): { book: string; ch: string; startV: number; endV: number } | null {
+  const m = input.trim().match(/^(.+?)\s+(\d+):(\d+)(?:\s*-\s*(\d+))?$/i);
+  if (!m) return null;
+  const raw = m[1].toLowerCase().replace(/\s+/g, " ").trim();
+  const ch = m[2]; const startV = parseInt(m[3]); const endV = parseInt(m[4] || m[3]);
+  for (const [abbr, name] of Object.entries(BOOK_NAMES)) {
+    if (abbr.toLowerCase() === raw || name.toLowerCase() === raw ||
+        name.toLowerCase().startsWith(raw) || abbr.toLowerCase().startsWith(raw)) {
+      return { book: abbr, ch, startV, endV };
+    }
+  }
+  return null;
+}
+
+function buildPhraseRows(book: string, ch: string, startV: number, endV: number, mode: TextMode): PhraseRow[] {
+  const rows: PhraseRow[] = [];
+  for (let v = startV; v <= Math.min(endV, startV + 29); v++) {
+    const text = getEnglishText(book, ch, String(v), mode);
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length) rows.push({ id: `${v}-${Date.now()}`, words, indent: 0, verseLabel: String(v) });
+  }
+  return rows.length ? rows : [{ id: "0", words: [], indent: 0 }];
 }
 
 function PhraseBuilderView({
@@ -2092,26 +2118,48 @@ function PhraseBuilderView({
 }: {
   book: string; chapter: string; verse: string; textMode: TextMode;
 }) {
-  const engText = getEnglishText(book, chapter, verse, textMode);
-  const sourceWords = engText.split(/\s+/).filter(Boolean);
+  const initialLabel = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+  const [refInput, setRefInput]   = useState(initialLabel);
+  const [refError, setRefError]   = useState("");
+  const [rows, setRows]           = useState<PhraseRow[]>(() => buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
+  const [activeLabel, setActiveLabel] = useState(initialLabel);
 
-  const makeRows = (): PhraseRow[] => [{ id: "0", words: sourceWords, indent: 0 }];
-  const [rows, setRows] = useState<PhraseRow[]>(makeRows);
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [dragOver, setDragOver] = useState<number | null>(null);
+  // 2-D pointer drag state
+  const dragData = useRef<{
+    rowIdx: number; startX: number; startY: number; startIndent: number;
+  } | null>(null);
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const [insertAt, setInsertAt]       = useState<number | null>(null);
+  const rowElsRef = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Reset when passage changes
+  // Sync when the main nav changes
   useEffect(() => {
-    const words = getEnglishText(book, chapter, verse, textMode).split(/\s+/).filter(Boolean);
-    setRows([{ id: Date.now().toString(), words, indent: 0 }]);
+    const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+    setRefInput(label);
+    setActiveLabel(label);
+    setRows(buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
+    setRefError("");
   }, [book, chapter, verse, textMode]);
 
+  /* ── Load a custom reference ── */
+  function loadRef() {
+    const parsed = parsePhraseRef(refInput);
+    if (!parsed) { setRefError("Couldn't parse reference. Try: \"Gen 5:8-13\""); return; }
+    const newRows = buildPhraseRows(parsed.book, parsed.ch, parsed.startV, parsed.endV, textMode);
+    if (!newRows[0].words.length) { setRefError("No English text found for that reference."); return; }
+    setRows(newRows);
+    setRefError("");
+    const end = parsed.startV === parsed.endV ? "" : `–${parsed.endV}`;
+    setActiveLabel(`${BOOK_NAMES[parsed.book] || parsed.book} ${parsed.ch}:${parsed.startV}${end}`);
+  }
+
+  /* ── Word split / merge ── */
   function splitAt(rowIdx: number, wordIdx: number) {
     if (wordIdx === 0) return;
     setRows(prev => {
       const row = prev[rowIdx];
       const before: PhraseRow = { ...row, words: row.words.slice(0, wordIdx) };
-      const after: PhraseRow  = { id: Date.now().toString(), words: row.words.slice(wordIdx), indent: row.indent + 1 };
+      const after: PhraseRow  = { id: `${Date.now()}`, words: row.words.slice(wordIdx), indent: row.indent + 1 };
       const next = [...prev];
       next.splice(rowIdx, 1, before, after);
       return next;
@@ -2128,130 +2176,214 @@ function PhraseBuilderView({
     });
   }
 
-  function adjustIndent(rowIdx: number, dir: -1 | 1) {
+  /* ── 2-D pointer-based drag ── */
+  function calcInsertAt(clientY: number, excludeIdx: number): number {
+    const els = rowElsRef.current;
+    for (let i = 0; i < els.length; i++) {
+      if (i === excludeIdx) continue;
+      const rect = els[i]?.getBoundingClientRect();
+      if (rect && clientY < rect.top + rect.height / 2) return i;
+    }
+    return els.length;
+  }
+
+  function onGripPointerDown(e: React.PointerEvent, rowIdx: number) {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragData.current = { rowIdx, startX: e.clientX, startY: e.clientY, startIndent: rows[rowIdx].indent };
+    setDraggingIdx(rowIdx);
+    setInsertAt(null);
+  }
+
+  function onGripPointerMove(e: React.PointerEvent, rowIdx: number) {
+    const d = dragData.current;
+    if (!d || d.rowIdx !== rowIdx) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+
+    // Horizontal → update indent live
+    const newIndent = Math.max(0, Math.min(12, d.startIndent + Math.round(dx / 36)));
     setRows(prev => {
+      if (prev[rowIdx].indent === newIndent) return prev;
       const next = [...prev];
-      next[rowIdx] = { ...next[rowIdx], indent: Math.max(0, Math.min(10, next[rowIdx].indent + dir)) };
+      next[rowIdx] = { ...next[rowIdx], indent: newIndent };
       return next;
     });
+
+    // Vertical → show insertion indicator (don't reorder yet)
+    if (Math.abs(dy) > 8) setInsertAt(calcInsertAt(e.clientY, rowIdx));
   }
 
-  function onDrop(targetIdx: number) {
-    if (dragIdx === null || dragIdx === targetIdx) { setDragIdx(null); setDragOver(null); return; }
-    setRows(prev => {
-      const next = [...prev];
-      const [item] = next.splice(dragIdx, 1);
-      next.splice(dragIdx < targetIdx ? targetIdx - 1 : targetIdx, 0, item);
-      return next;
-    });
-    setDragIdx(null); setDragOver(null);
+  function onGripPointerUp(e: React.PointerEvent, rowIdx: number) {
+    const d = dragData.current;
+    if (!d) return;
+    dragData.current = null;
+
+    // Apply vertical reorder
+    if (insertAt !== null && insertAt !== rowIdx) {
+      setRows(prev => {
+        const next = [...prev];
+        const [item] = next.splice(rowIdx, 1);
+        const target = insertAt > rowIdx ? insertAt - 1 : insertAt;
+        next.splice(target, 0, item);
+        return next;
+      });
+    }
+    setDraggingIdx(null);
+    setInsertAt(null);
   }
 
-  const bookName = BOOK_NAMES[book] || book;
-
-  if (!sourceWords.length) {
-    return <p className="text-sm text-text-muted opacity-60">No English text available for this verse.</p>;
-  }
+  const isEmpty = rows.every(r => r.words.length === 0);
 
   return (
     <div className="max-w-3xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20">
-          <span className="text-xs font-semibold text-accent tracking-wide">{bookName} {chapter}:{verse}</span>
-          <span className="text-[10px] text-accent/60">Phrase Structure</span>
+      {/* ── Reference picker ── */}
+      <div className="mb-6 flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 shrink-0">
+            <Columns2 className="h-3 w-3 text-accent" />
+            <span className="text-xs font-semibold text-accent tracking-wide">{activeLabel}</span>
+            <span className="text-[10px] text-accent/60">Phrase Structure</span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-1 min-w-[240px]">
+            <input
+              value={refInput}
+              onChange={e => { setRefInput(e.target.value); setRefError(""); }}
+              onKeyDown={e => e.key === "Enter" && loadRef()}
+              placeholder="e.g. Gen 5:8-13 or John 3:16-17"
+              className="flex-1 h-7 bg-bg-elevated border border-border-subtle px-2.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
+            />
+            <button
+              onClick={loadRef}
+              className="h-7 px-3 text-xs border border-border-subtle text-text-muted hover:border-accent hover:text-accent transition-colors rounded-lg shrink-0"
+            >
+              Load
+            </button>
+            <button
+              onClick={() => {
+                const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+                setRefInput(label); setActiveLabel(label);
+                setRows(buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
+                setRefError("");
+              }}
+              className="h-7 px-2 text-xs border border-border-subtle text-text-muted hover:text-text-primary transition-colors rounded-lg shrink-0"
+              title="Reset to current verse"
+            >
+              Reset
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <p className="text-[10px] text-text-muted opacity-60 hidden sm:block">
-            Click any word to split there · drag rows to reorder · ← → to indent
-          </p>
-          <button
-            onClick={() => setRows(makeRows())}
-            className="text-[10px] px-2.5 py-1 border border-border-subtle rounded-lg text-text-muted hover:text-text-primary hover:border-[#3a4052] transition-colors"
-          >
-            Reset
-          </button>
-        </div>
+        {refError && <p className="text-xs text-red-400 pl-1">{refError}</p>}
+        <p className="text-[10px] text-text-muted opacity-40 pl-1">
+          Hover a row to reveal the drag handle · left/right = indent · up/down = reorder · click a word to split
+        </p>
       </div>
 
-      {/* Phrase rows */}
-      <div className="flex flex-col gap-0.5 select-none font-serif">
+      {isEmpty && (
+        <p className="text-sm text-text-muted opacity-60">No English text found for this passage.</p>
+      )}
+
+      {/* ── Phrase rows ── */}
+      <div className="flex flex-col gap-px select-none">
         {rows.map((row, rIdx) => (
-          <div
-            key={row.id}
-            draggable
-            onDragStart={() => setDragIdx(rIdx)}
-            onDragOver={e => { e.preventDefault(); setDragOver(rIdx); }}
-            onDrop={() => onDrop(rIdx)}
-            onDragEnd={() => { setDragIdx(null); setDragOver(null); }}
-            className={cn(
-              "flex items-center gap-1.5 py-1.5 rounded-lg transition-all group",
-              dragIdx === rIdx && "opacity-30",
-              dragOver === rIdx && dragIdx !== rIdx && "border-t-2 border-accent"
+          <div key={row.id}>
+            {/* Drop indicator line above this row */}
+            {insertAt === rIdx && draggingIdx !== rIdx && (
+              <div className="relative h-0.5 mx-2 mb-0.5 overflow-visible">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-accent to-transparent rounded-full" />
+                <div className="absolute inset-0 bg-accent/40 blur-[3px] rounded-full" />
+              </div>
             )}
-            style={{ paddingLeft: `${row.indent * 36 + 4}px` }}
-          >
-            {/* Drag handle */}
-            <GripVertical className="h-4 w-4 text-text-muted opacity-0 group-hover:opacity-30 cursor-grab shrink-0" />
+            <div
+              ref={el => { rowElsRef.current[rIdx] = el; }}
+              className={cn(
+                "flex items-center gap-2 py-1.5 rounded-xl group transition-all duration-150",
+                draggingIdx === rIdx
+                  ? "opacity-30 scale-[0.97] ring-1 ring-accent/20 bg-bg-elevated/60 shadow-lg shadow-accent/5"
+                  : "hover:bg-bg-elevated/20"
+              )}
+              style={{ paddingLeft: `${row.indent * 36}px` }}
+            >
+              {/* Verse label badge */}
+              {row.verseLabel && (
+                <span className="text-[10px] font-bold text-accent/60 w-5 text-right shrink-0 select-none">
+                  {row.verseLabel}
+                </span>
+              )}
 
-            {/* Indent controls */}
-            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-60 shrink-0">
-              <button
-                onClick={() => adjustIndent(rIdx, -1)}
-                disabled={row.indent === 0}
-                className="h-5 w-5 flex items-center justify-center text-[10px] text-text-muted hover:text-text-primary disabled:opacity-20 rounded hover:bg-bg-elevated"
-                title="Dedent"
-              >←</button>
-              <button
-                onClick={() => adjustIndent(rIdx, 1)}
-                className="h-5 w-5 flex items-center justify-center text-[10px] text-text-muted hover:text-text-primary rounded hover:bg-bg-elevated"
-                title="Indent"
-              >→</button>
+              {/* 2D grip handle — 6-dot modern grid */}
+              <div
+                className="flex items-center justify-center h-7 w-5 cursor-grab active:cursor-grabbing shrink-0 touch-none"
+                title="Drag left/right to indent · drag up/down to reorder"
+                onPointerDown={e => onGripPointerDown(e, rIdx)}
+                onPointerMove={e => onGripPointerMove(e, rIdx)}
+                onPointerUp={e => onGripPointerUp(e, rIdx)}
+              >
+                <svg
+                  viewBox="0 0 8 12" width="8" height="12"
+                  className="opacity-0 group-hover:opacity-50 transition-all duration-200 group-hover:scale-110"
+                  style={{ fill: "var(--color-text-muted, #888)" }}
+                >
+                  <circle cx="2" cy="2"  r="1.2" />
+                  <circle cx="6" cy="2"  r="1.2" />
+                  <circle cx="2" cy="6"  r="1.2" />
+                  <circle cx="6" cy="6"  r="1.2" />
+                  <circle cx="2" cy="10" r="1.2" />
+                  <circle cx="6" cy="10" r="1.2" />
+                </svg>
+              </div>
+
+              {/* Words */}
+              <div className="flex flex-wrap gap-x-[0.32em] gap-y-1 items-baseline">
+                {row.words.map((word, wIdx) => {
+                  const isFirst = wIdx === 0;
+                  const canMerge = isFirst && rIdx > 0;
+                  const canSplit = !isFirst;
+                  return (
+                    <button
+                      key={wIdx}
+                      onClick={() => { if (canSplit) splitAt(rIdx, wIdx); else if (canMerge) mergeUp(rIdx); }}
+                      title={canSplit ? "Split here — new row below" : canMerge ? "Merge with row above" : ""}
+                      className={cn(
+                        "text-xl leading-snug font-serif transition-colors",
+                        canSplit && "hover:text-accent cursor-pointer",
+                        canMerge && "hover:text-orange-400 cursor-pointer",
+                        !canSplit && !canMerge && "cursor-default text-text-primary"
+                      )}
+                    >
+                      {word}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Merge-up pill */}
+              {rIdx > 0 && (
+                <button
+                  onClick={() => mergeUp(rIdx)}
+                  className="opacity-0 group-hover:opacity-30 hover:!opacity-100 text-[9px] px-2 py-0.5 bg-bg-elevated border border-border-subtle rounded-full text-text-muted hover:text-orange-400 hover:border-orange-400/40 hover:bg-orange-400/5 ml-1 shrink-0 transition-all duration-150"
+                >
+                  ↑ merge
+                </button>
+              )}
             </div>
-
-            {/* Words */}
-            <div className="flex flex-wrap gap-x-[0.3em] gap-y-1 items-baseline">
-              {row.words.map((word, wIdx) => {
-                const isFirstOfRow = wIdx === 0;
-                const canMerge = isFirstOfRow && rIdx > 0;
-                const canSplit = !isFirstOfRow;
-                return (
-                  <button
-                    key={wIdx}
-                    onClick={() => canSplit ? splitAt(rIdx, wIdx) : canMerge ? mergeUp(rIdx) : undefined}
-                    title={canSplit ? "Split here → new row below" : canMerge ? "Merge with row above" : ""}
-                    className={cn(
-                      "text-xl leading-snug transition-colors",
-                      canSplit && "hover:text-accent cursor-pointer hover:underline decoration-accent/50",
-                      canMerge && "hover:text-red-400 cursor-pointer",
-                      !canSplit && !canMerge && "cursor-default text-text-primary"
-                    )}
-                    style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
-                  >
-                    {word}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Merge-up button (visible on hover for non-first rows) */}
-            {rIdx > 0 && (
-              <button
-                onClick={() => mergeUp(rIdx)}
-                className="opacity-0 group-hover:opacity-40 text-[10px] text-text-muted hover:text-red-400 ml-2 shrink-0 transition-all"
-                title="Merge this row with the one above"
-              >↑ merge</button>
-            )}
           </div>
         ))}
+        {/* Drop indicator at the very bottom */}
+        {insertAt === rows.length && (
+          <div className="relative h-0.5 mx-2 mt-0.5 overflow-visible">
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-accent to-transparent rounded-full" />
+            <div className="absolute inset-0 bg-accent/40 blur-[3px] rounded-full" />
+          </div>
+        )}
       </div>
 
       {/* Legend */}
-      <div className="mt-8 pt-4 border-t border-border-subtle/40 flex flex-wrap gap-4 text-[10px] text-text-muted opacity-60">
-        <span><span className="text-accent">click word</span> → split / start new row below</span>
-        <span><span className="text-red-400">click 1st word</span> → merge with row above</span>
-        <span><span className="text-text-primary">drag row</span> → reorder</span>
-        <span><span className="text-text-primary">← →</span> → indent level</span>
+      <div className="mt-8 pt-4 border-t border-border-subtle/40 flex flex-wrap gap-x-5 gap-y-1 text-[10px] text-text-muted opacity-50">
+        <span><span className="text-accent">click word</span> → split, new row below</span>
+        <span><span className="text-orange-400">click 1st word</span> → merge with row above</span>
+        <span><span className="text-text-primary">drag grip ↕</span> → reorder rows</span>
+        <span><span className="text-text-primary">drag grip ↔</span> → indent row</span>
       </div>
     </div>
   );
