@@ -39,4 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-public/rhema/
+public/rhema/rhema-nt.js
+public/rhema/rhema-critical.js
+public/rhema/rhema-lxx.js
+public/rhema/rhema-lexicon.js
+public/rhema/rhema-mm.js
+public/rhema/rhema-msb.js
+public/rhema/rhema-bsb.js
+public/rhema/rhema-syntax.js
+public/rhema/rhema-crossrefs.js
