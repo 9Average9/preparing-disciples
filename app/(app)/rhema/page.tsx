@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
   decodeMorph, normalizePosKey, type MorphRow,
+  decodeHebrewMorph, normalizeHebrewPosKey, type HebrewMorphRow,
 } from "./utils";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -26,6 +27,9 @@ declare global {
     RhemaCrossRefs?: Record<string, Record<string, string[]>>;
     RhemaCrossRefLabels?: string[];
     RhemaSyntax?: Record<string, Record<string, Record<string, Array<[number, number, string]>>>>;
+    /* Hebrew */
+    RhemaOTHebrew?: { books: string[]; names: Record<string,string>; text: Record<string,Record<string,Record<string,Array<[string,number,string]>>>> };
+    RhemaHebrewLexicon?: Record<number, HebrewLexEntry>;
   }
 }
 
@@ -47,6 +51,15 @@ interface LexEntry {
   deriv?: string;
 }
 
+interface HebrewLexEntry {
+  lemma?: string;
+  translit?: string;
+  brief?: string;
+  strongs_def?: string;
+  kjv_def?: string;
+  deriv?: string;
+}
+
 type Word = [string, number, string]; // [surface, strongs, morph]
 type TextMode = "majority" | "critical";
 type ActiveTab = "parsing" | "definition" | "occurrences";
@@ -54,11 +67,12 @@ type ActiveTab = "parsing" | "definition" | "occurrences";
 const STORAGE_BASE =
   "https://firebasestorage.googleapis.com/v0/b/disciple-preparer.firebasestorage.app/o/rhema%2F";
 
-const DATA_FILES = [
+const DATA_FILES_CORE = [
   "rhema-nt.js", "rhema-critical.js", "rhema-lxx.js",
   "rhema-lexicon.js", "rhema-mm.js", "rhema-msb.js",
   "rhema-bsb.js", "rhema-syntax.js", "rhema-crossrefs.js",
 ];
+const DATA_FILES_HEBREW = ["rhema-ot-hebrew.js", "rhema-hebrew-lexicon.js"];
 
 const CROSS_REF_LABELS: Record<string, string> = {
   d: "Immediate Context", t: "Same Book", o: "Related",
@@ -77,6 +91,20 @@ const CATEGORY_CONFIG: Record<string, { label: string; text: string; bg: string;
   PREP: { label: "Prepositions", text: "text-rose-400",    bg: "bg-rose-500/15",    border: "border-rose-500/50",    dot: "bg-rose-400" },
   ADV:  { label: "Adverbs",      text: "text-teal-400",    bg: "bg-teal-500/15",    border: "border-teal-500/50",    dot: "bg-teal-400" },
   PART: { label: "Particles",    text: "text-yellow-400",  bg: "bg-yellow-500/15",  border: "border-yellow-500/50",  dot: "bg-yellow-400" },
+};
+
+/* Hebrew POS categories */
+const HEBREW_CATEGORY_CONFIG: Record<string, { label: string; text: string; bg: string; border: string; dot: string }> = {
+  V:  { label: "Verbs",        text: "text-orange-400",  bg: "bg-orange-500/15",  border: "border-orange-500/50",  dot: "bg-orange-400" },
+  N:  { label: "Nouns",        text: "text-blue-400",    bg: "bg-blue-500/15",    border: "border-blue-500/50",    dot: "bg-blue-400" },
+  Np: { label: "Proper Nouns", text: "text-sky-400",     bg: "bg-sky-500/15",     border: "border-sky-500/50",     dot: "bg-sky-400" },
+  A:  { label: "Adjectives",   text: "text-purple-400",  bg: "bg-purple-500/15",  border: "border-purple-500/50",  dot: "bg-purple-400" },
+  P:  { label: "Pronouns",     text: "text-red-400",     bg: "bg-red-500/15",     border: "border-red-500/50",     dot: "bg-red-400" },
+  R:  { label: "Prepositions", text: "text-rose-400",    bg: "bg-rose-500/15",    border: "border-rose-500/50",    dot: "bg-rose-400" },
+  C:  { label: "Conjunctions", text: "text-green-400",   bg: "bg-green-500/15",   border: "border-green-500/50",   dot: "bg-green-400" },
+  D:  { label: "Adverbs",      text: "text-teal-400",    bg: "bg-teal-500/15",    border: "border-teal-500/50",    dot: "bg-teal-400" },
+  T:  { label: "Particles",    text: "text-yellow-400",  bg: "bg-yellow-500/15",  border: "border-yellow-500/50",  dot: "bg-yellow-400" },
+  S:  { label: "Suffixes",     text: "text-amber-400",   bg: "bg-amber-500/15",   border: "border-amber-500/50",   dot: "bg-amber-400" },
 };
 
 /* ── Data helpers ───────────────────────────────────────────── */
@@ -98,7 +126,10 @@ function getText(mode: TextMode) {
   return base;
 }
 
-function getWords(book: string, ch: string, v: string, mode: TextMode): Word[] {
+function getWords(book: string, ch: string, v: string, mode: TextMode, hebrew = false): Word[] {
+  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
+    return window.RhemaOTHebrew.text[book]?.[ch]?.[v] || [];
+  }
   return getText(mode)[book]?.[ch]?.[v] || [];
 }
 
@@ -111,23 +142,49 @@ function getEnglishLabel(mode: TextMode) {
   return mode === "critical" ? "BSB" : "MSB";
 }
 
-function getBookOrder(mode: TextMode): string[] {
+function getBookOrder(mode: TextMode, hebrew = false): string[] {
+  if (hebrew && window.RhemaOTHebrew) {
+    const ntText = getText(mode);
+    const otBooks = OT_BOOK_ORDER.filter(b => window.RhemaOTHebrew!.text[b]);
+    const ntBooks = NT_BOOK_ORDER.filter(b => ntText[b]);
+    return [...otBooks, ...ntBooks];
+  }
   const text = getText(mode);
   return BOOK_ORDER.filter(c => text[c]);
 }
 
-function getChapters(book: string, mode: TextMode): string[] {
+function getChapters(book: string, mode: TextMode, hebrew = false): string[] {
+  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
+    const chObj = window.RhemaOTHebrew.text[book] || {};
+    return Object.keys(chObj).sort((a, b) => Number(a) - Number(b));
+  }
   const chObj = getText(mode)[book] || {};
   return Object.keys(chObj).sort((a, b) => Number(a) - Number(b));
 }
 
-function getVerses(book: string, ch: string, mode: TextMode): string[] {
+function getVerses(book: string, ch: string, mode: TextMode, hebrew = false): string[] {
+  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
+    const vObj = window.RhemaOTHebrew.text[book]?.[ch] || {};
+    return Object.keys(vObj).sort((a, b) => Number(a) - Number(b));
+  }
   const vObj = getText(mode)[book]?.[ch] || {};
   return Object.keys(vObj).sort((a, b) => Number(a) - Number(b));
 }
 
 function getLex(strongs: number): LexEntry {
   return (window.RhemaLexicon || {})[strongs] || {};
+}
+
+function getHebrewLex(strongs: number): HebrewLexEntry {
+  return (window.RhemaHebrewLexicon || {})[strongs] || {};
+}
+
+function isOTBook(book: string): boolean {
+  return OT_BOOK_ORDER.includes(book);
+}
+
+function hebrewAvailable(): boolean {
+  return !!(window.RhemaOTHebrew && window.RhemaHebrewLexicon);
 }
 
 function getQuickDef(lex: LexEntry): string {
@@ -228,19 +285,32 @@ function getWordGloss(lex: LexEntry, morph: string): string {
   return nounGloss(morph, brief);
 }
 
-function getOccurrences(strongs: number, mode: TextMode): { total: number; books: Record<string, number> } {
-  const text = getText(mode);
+function getOccurrences(strongs: number, mode: TextMode, hebrew = false): { total: number; books: Record<string, number> } {
   const result: Record<string, number> = {};
   let total = 0;
-  for (const book of getBookOrder(mode)) {
-    const bookText = text[book] || {};
-    let count = 0;
-    for (const ch of Object.keys(bookText)) {
-      for (const v of Object.keys(bookText[ch])) {
-        count += (bookText[ch][v] || []).filter((w: Word) => w[1] === strongs).length;
+  if (hebrew && window.RhemaOTHebrew) {
+    for (const book of (window.RhemaOTHebrew.books || OT_BOOK_ORDER)) {
+      const bookText = window.RhemaOTHebrew.text[book] || {};
+      let count = 0;
+      for (const ch of Object.keys(bookText)) {
+        for (const v of Object.keys(bookText[ch])) {
+          count += (bookText[ch][v] || []).filter((w: Word) => w[1] === strongs).length;
+        }
       }
+      if (count > 0) { result[book] = count; total += count; }
     }
-    if (count > 0) { result[book] = count; total += count; }
+  } else {
+    const text = getText(mode);
+    for (const book of getBookOrder(mode)) {
+      const bookText = text[book] || {};
+      let count = 0;
+      for (const ch of Object.keys(bookText)) {
+        for (const v of Object.keys(bookText[ch])) {
+          count += (bookText[ch][v] || []).filter((w: Word) => w[1] === strongs).length;
+        }
+      }
+      if (count > 0) { result[book] = count; total += count; }
+    }
   }
   return { total, books: result };
 }
@@ -752,6 +822,7 @@ export default function RhemaPage() {
   const { user } = useAuthContext();
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [hebrewMode, setHebrewMode] = useState(false);
   const [book, setBook] = useState("JOH");
   const [chapter, setChapter] = useState("3");
   const [verse, setVerse] = useState("16");
@@ -834,16 +905,28 @@ export default function RhemaPage() {
   useEffect(() => {
     if (loadingRef.current) return;
     loadingRef.current = true;
-    let count = 0;
+    let coreCount = 0;
     let failed = false;
-    for (const file of DATA_FILES) {
+    for (const file of DATA_FILES_CORE) {
       const s = document.createElement("script");
       s.src = `${STORAGE_BASE}${encodeURIComponent(file)}?alt=media`;
       s.onload = () => {
-        count++;
-        if (count === DATA_FILES.length) { setLoaded(true); forceUpdate(n => n + 1); }
+        coreCount++;
+        if (coreCount === DATA_FILES_CORE.length) { setLoaded(true); forceUpdate(n => n + 1); }
       };
       s.onerror = () => { if (!failed) { failed = true; setLoadError(true); } };
+      document.head.appendChild(s);
+    }
+    // Hebrew files load silently — app works without them
+    let hebrewCount = 0;
+    for (const file of DATA_FILES_HEBREW) {
+      const s = document.createElement("script");
+      s.src = `${STORAGE_BASE}${encodeURIComponent(file)}?alt=media`;
+      s.onload = () => {
+        hebrewCount++;
+        if (hebrewCount === DATA_FILES_HEBREW.length) forceUpdate(n => n + 1);
+      };
+      s.onerror = () => { /* Hebrew unavailable — silent fail */ };
       document.head.appendChild(s);
     }
   }, []);
@@ -901,44 +984,47 @@ export default function RhemaPage() {
   }, [loaded, book, chapter, verse, textMode]);
 
   const navigateVerse = useCallback((dir: 1 | -1) => {
-    const verses = getVerses(book, chapter, textMode);
+    const heb = hebrewMode && isOTBook(book);
+    const verses = getVerses(book, chapter, textMode, heb);
     const idx = verses.indexOf(verse);
     if (dir === 1) {
       if (idx < verses.length - 1) { setVerse(verses[idx + 1]); setActiveWord(null); }
       else {
-        const chs = getChapters(book, textMode);
+        const chs = getChapters(book, textMode, heb);
         const ci = chs.indexOf(chapter);
         if (ci < chs.length - 1) {
           const nc = chs[ci + 1];
-          const nv = getVerses(book, nc, textMode)[0];
+          const nv = getVerses(book, nc, textMode, heb)[0];
           setChapter(nc); setVerse(nv); setActiveWord(null);
         }
       }
     } else {
       if (idx > 0) { setVerse(verses[idx - 1]); setActiveWord(null); }
       else {
-        const chs = getChapters(book, textMode);
+        const chs = getChapters(book, textMode, heb);
         const ci = chs.indexOf(chapter);
         if (ci > 0) {
           const nc = chs[ci - 1];
-          const nvs = getVerses(book, nc, textMode);
+          const nvs = getVerses(book, nc, textMode, heb);
           setChapter(nc); setVerse(nvs[nvs.length - 1]); setActiveWord(null);
         }
       }
     }
-  }, [book, chapter, verse, textMode]);
+  }, [book, chapter, verse, textMode, hebrewMode]);
 
   function selectBook(code: string) {
-    const chs = getChapters(code, textMode);
+    const heb = hebrewMode && isOTBook(code);
+    const chs = getChapters(code, textMode, heb);
     const firstCh = chs[0] || "1";
-    const firstV = getVerses(code, firstCh, textMode)[0] || "1";
+    const firstV = getVerses(code, firstCh, textMode, heb)[0] || "1";
     setBook(code); setChapter(firstCh); setVerse(firstV);
     setActiveWord(null); setBookPickerOpen(false); setBookSearch("");
     setNavHistory([]);
   }
 
   function selectChapter(ch: string) {
-    const firstV = getVerses(book, ch, textMode)[0] || "1";
+    const heb = hebrewMode && isOTBook(book);
+    const firstV = getVerses(book, ch, textMode, heb)[0] || "1";
     setChapter(ch); setVerse(firstV);
     setActiveWord(null); setChPickerOpen(false);
   }
@@ -969,10 +1055,10 @@ export default function RhemaPage() {
   }
 
   function copyVerse() {
-    const ws = getWords(book, chapter, verse, textMode);
-    const greek = ws.map(w => w[0]).join(" ");
+    const ws = getWords(book, chapter, verse, textMode, isHebrew);
+    const scriptText = ws.map(w => w[0]).join(" ");
     const english = getEnglishText(book, chapter, verse, textMode);
-    const text = `${BOOK_NAMES[book] || book} ${chapter}:${verse}\n${greek}${english ? "\n" + english : ""}`;
+    const text = `${BOOK_NAMES[book] || book} ${chapter}:${verse}\n${scriptText}${english ? "\n" + english : ""}`;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -1002,26 +1088,28 @@ export default function RhemaPage() {
   }
 
   /* ── Computed values ── */
-  const allBooks   = loaded ? getBookOrder(textMode) : [];
-  const chapters   = loaded ? getChapters(book, textMode) : [];
-  const verses     = loaded ? getVerses(book, chapter, textMode) : [];
-  const bookName   = BOOK_NAMES[book] || book;
+  const isHebrew    = hebrewMode && isOTBook(book) && hebrewAvailable();
+  const allBooks    = loaded ? getBookOrder(textMode, hebrewMode && hebrewAvailable()) : [];
+  const chapters    = loaded ? getChapters(book, textMode, isHebrew) : [];
+  const verses      = loaded ? getVerses(book, chapter, textMode, isHebrew) : [];
+  const bookName    = BOOK_NAMES[book] || book;
   const englishText = loaded ? getEnglishText(book, chapter, verse, textMode) : "";
   const variantSet  = loaded ? getVariantSet(book, chapter, verse, textMode) : new Set<number>();
   const crossRefs   = loaded ? (window.RhemaCrossRefs?.[`${book} ${chapter}:${verse}`] || null) : null;
   const hasCrossRefs = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
-  const hasActiveMode = syntaxMode || fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0;
+  const hasActiveMode = syntaxMode || fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0 || (isHebrew && hebrewMode);
 
   /* POS categories present in the current verse */
   const versePosCats = useMemo(() => {
     if (!loaded) return new Set<string>();
     const cats = new Set<string>();
-    for (const w of getWords(book, chapter, verse, textMode)) {
-      const cat = normalizePosKey(w[2]);
+    const normalizer = isHebrew ? normalizeHebrewPosKey : normalizePosKey;
+    for (const w of getWords(book, chapter, verse, textMode, isHebrew)) {
+      const cat = normalizer(w[2]);
       if (cat) cats.add(cat);
     }
     return cats;
-  }, [loaded, book, chapter, verse, textMode]);
+  }, [loaded, book, chapter, verse, textMode, isHebrew]);
 
   /* Categories that are intended AND present in the current verse */
   const activeHighlights = useMemo(() => {
@@ -1185,12 +1273,15 @@ export default function RhemaPage() {
                 greekOnly={greekOnly} showEnglish={showEnglish}
                 textMode={textMode} showHighlighter={showHighlighter}
                 intendedCount={intendedHighlights.size}
+                isOTBook={isOTBook(book)} hebrewMode={hebrewMode}
+                hebrewAvailable={hebrewAvailable()}
                 onToggleSyntax={() => { setSyntaxMode(v => !v); setShowWandPopup(false); setSelectedSxPhrase(null); }}
                 onToggleChapter={() => setFullChapter(v => !v)}
                 onToggleGreekOnly={() => setGreekOnly(v => !v)}
                 onToggleEnglish={() => setShowEnglish(v => !v)}
                 onToggleTextMode={() => setTextMode(m => m === "critical" ? "majority" : "critical")}
                 onToggleHighlight={() => { setShowHighlighter(v => !v); setShowWandPopup(false); }}
+                onToggleHebrew={() => { setHebrewMode(v => !v); setActiveWord(null); setShowWandPopup(false); }}
               />
             )}
           </div>
@@ -1228,6 +1319,7 @@ export default function RhemaPage() {
           activeHighlights={activeHighlights}
           versePosCats={versePosCats}
           shaking={shaking}
+          isHebrew={isHebrew}
           onToggle={toggleHighlightCategory}
           onClearAll={() => setIntendedHighlights(new Set())}
           onClose={() => setShowHighlighter(false)}
@@ -1237,7 +1329,7 @@ export default function RhemaPage() {
       {/* ── Body ── */}
       <div className="flex flex-1 min-h-0">
         <div className="flex-1 overflow-y-auto p-6 min-w-0">
-          {syntaxMode ? (
+          {syntaxMode && !isHebrew ? (
             <SyntaxView
               book={book} chapter={chapter} verse={verse} textMode={textMode}
               onPhraseClick={(p) => { setSelectedSxPhrase(p); setActiveWord(null); setShowCrossRefs(false); setShowNotes(false); setShowLibrary(false); }}
@@ -1248,6 +1340,7 @@ export default function RhemaPage() {
               book={book} chapter={chapter} verse={verse}
               textMode={textMode} greekOnly={greekOnly} showEnglish={showEnglish}
               activeWord={activeWord} activeHighlights={activeHighlights}
+              isHebrew={isHebrew}
               onWordClick={(w) => { setActiveWord(w); setActiveTab("parsing"); closeAllPanels(); setActiveWord(w); }}
               englishLabel={getEnglishLabel(textMode)}
             />
@@ -1256,6 +1349,7 @@ export default function RhemaPage() {
               book={book} chapter={chapter} verse={verse}
               textMode={textMode} greekOnly={greekOnly} showEnglish={showEnglish}
               activeWord={activeWord} activeHighlights={activeHighlights} variantSet={variantSet}
+              isHebrew={isHebrew}
               onWordClick={(w) => { setActiveWord(w); setActiveTab("parsing"); closeAllPanels(); setActiveWord(w); }}
               englishText={englishText}
               englishLabel={getEnglishLabel(textMode)}
@@ -1271,6 +1365,7 @@ export default function RhemaPage() {
           <WordDetail
             word={activeWord} activeTab={activeTab} setActiveTab={setActiveTab}
             textMode={textMode} book={book} chapter={chapter} verse={verse}
+            isHebrew={isHebrew}
             onClose={() => setActiveWord(null)}
             onNavigateOccurrence={handleNavigateOccurrence}
             onGrammarExample={(cat, val) => setGrammarModal({ category: cat, value: val })}
@@ -1289,9 +1384,10 @@ export default function RhemaPage() {
             query={libraryQuery}
             setQuery={setLibraryQuery}
             loaded={loaded}
+            isHebrew={isHebrew}
             onSelectLex={(strongs, lex) => {
-              const morph = findAnyMorphForStrongs(strongs);
-              setActiveWord([lex.lemma || "", strongs, morph]);
+              const morph = isHebrew ? "" : findAnyMorphForStrongs(strongs);
+              setActiveWord([(lex as LexEntry | HebrewLexEntry).lemma || "", strongs, morph]);
               setActiveTab("definition");
               setShowLibrary(false);
             }}
@@ -1331,7 +1427,14 @@ export default function RhemaPage() {
             autoFocus />
           {otBooks.length > 0 && (
             <>
-              <p className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-2">Old Testament</p>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-xs font-semibold text-text-muted uppercase tracking-widest">Old Testament</p>
+                {hebrewAvailable() && (
+                  <span className="text-[10px] text-accent opacity-70 font-mono">
+                    {hebrewMode ? "Hebrew" : "LXX"}
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-3 gap-1 mb-4">
                 {otBooks.map(c => (
                   <button key={c} onClick={() => selectBook(c)}
@@ -1509,7 +1612,7 @@ function SyntaxPhraseChip({ phrase, words, cats, onClick }: {
       <span className={cn("text-[10px] font-semibold uppercase tracking-widest leading-none", chip.text)}>
         {phrase.plainLabel || phrase.label}
       </span>
-      <span className="text-lg leading-tight" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
+      <span className="text-xl leading-tight" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
         {greekWords.join(" ")}
       </span>
       {glossWords.length > 0 && (
@@ -1631,30 +1734,39 @@ function GrammarExamplesModal({ category, value, onClose }: {
 /* ── VerseView ──────────────────────────────────────────────── */
 function VerseView({
   book, chapter, verse, textMode, greekOnly, showEnglish,
-  activeWord, activeHighlights, variantSet, onWordClick, englishText, englishLabel,
+  activeWord, activeHighlights, variantSet, isHebrew, onWordClick, englishText, englishLabel,
 }: {
   book: string; chapter: string; verse: string; textMode: TextMode;
   greekOnly: boolean; showEnglish: boolean; activeWord: Word | null;
   activeHighlights: Set<string>; variantSet: Set<number>;
+  isHebrew: boolean;
   onWordClick: (w: Word) => void;
   englishText: string; englishLabel: string;
 }) {
-  const words = getWords(book, chapter, verse, textMode);
+  const words = getWords(book, chapter, verse, textMode, isHebrew);
   const ref = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+  const catConfig = isHebrew ? HEBREW_CATEGORY_CONFIG : CATEGORY_CONFIG;
+  const normalizer = isHebrew ? normalizeHebrewPosKey : normalizePosKey;
   return (
     <div className="max-w-3xl mx-auto">
       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 mb-7">
         <span className="text-xs font-semibold text-accent tracking-wide">{ref}</span>
+        {isHebrew && <span className="text-[10px] text-accent/60 font-mono">Hebrew</span>}
       </div>
-      <div className={cn("flex flex-wrap gap-x-3 gap-y-4 mb-6", greekOnly && "gap-y-2")}>
+      <div className={cn(
+        "flex flex-wrap gap-x-4 gap-y-5 mb-6",
+        isHebrew && "flex-row-reverse",
+        greekOnly && "gap-y-2"
+      )}>
         {words.map((w, i) => {
-          const cat = normalizePosKey(w[2]);
-          const hlConfig = cat && activeHighlights.has(cat) ? CATEGORY_CONFIG[cat] : null;
+          const cat = normalizer(w[2]);
+          const hlConfig = cat && activeHighlights.has(cat) ? catConfig[cat] : null;
           return (
             <WordChip key={i} word={w} greekOnly={greekOnly}
               active={activeWord?.[0] === w[0] && activeWord?.[1] === w[1]}
-              isVariant={variantSet.has(i)}
+              isVariant={!isHebrew && variantSet.has(i)}
               highlightConfig={hlConfig ?? null}
+              isHebrew={isHebrew}
               onClick={() => onWordClick(w)}
             />
           );
@@ -1675,38 +1787,46 @@ function VerseView({
 /* ── ChapterView ────────────────────────────────────────────── */
 function ChapterView({
   book, chapter, verse: targetVerse, textMode, greekOnly, showEnglish,
-  activeWord, activeHighlights, onWordClick, englishLabel,
+  activeWord, activeHighlights, isHebrew, onWordClick, englishLabel,
 }: {
   book: string; chapter: string; verse: string; textMode: TextMode;
   greekOnly: boolean; showEnglish: boolean; activeWord: Word | null;
-  activeHighlights: Set<string>;
+  activeHighlights: Set<string>; isHebrew: boolean;
   onWordClick: (w: Word) => void;
   englishLabel: string;
 }) {
-  const verses = getVerses(book, chapter, textMode);
+  const verses = getVerses(book, chapter, textMode, isHebrew);
   const bookName = BOOK_NAMES[book] || book;
+  const catConfig = isHebrew ? HEBREW_CATEGORY_CONFIG : CATEGORY_CONFIG;
+  const normalizer = isHebrew ? normalizeHebrewPosKey : normalizePosKey;
   return (
     <div className="max-w-3xl mx-auto">
       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 mb-7">
         <span className="text-xs font-semibold text-accent tracking-wide">{bookName} {chapter}</span>
+        {isHebrew && <span className="text-[10px] text-accent/60 font-mono">Hebrew</span>}
       </div>
       {verses.map(v => {
-        const words = getWords(book, chapter, v, textMode);
+        const words = getWords(book, chapter, v, textMode, isHebrew);
         const engText = getEnglishText(book, chapter, v, textMode);
         const isTarget = v === targetVerse;
-        const variantSet = getVariantSet(book, chapter, v, textMode);
+        const variantSet = isHebrew ? new Set<number>() : getVariantSet(book, chapter, v, textMode);
         return (
           <div key={v} className={cn("mb-8 pb-6 border-b border-border-subtle/50", isTarget && "bg-accent/3 -mx-2 px-2 rounded")}>
             <span className="text-xs font-bold text-accent mr-2 select-none">{v}</span>
-            <div className={cn("inline-flex flex-wrap gap-x-3 gap-y-3 mt-2", greekOnly && "gap-y-1")}>
+            <div className={cn(
+              "inline-flex flex-wrap gap-x-4 gap-y-4 mt-2",
+              isHebrew && "flex-row-reverse w-full justify-end",
+              greekOnly && "gap-y-1"
+            )}>
               {words.map((w, i) => {
-                const cat = normalizePosKey(w[2]);
-                const hlConfig = cat && activeHighlights.has(cat) ? CATEGORY_CONFIG[cat] : null;
+                const cat = normalizer(w[2]);
+                const hlConfig = cat && activeHighlights.has(cat) ? catConfig[cat] : null;
                 return (
                   <WordChip key={i} word={w} greekOnly={greekOnly}
                     active={activeWord?.[0] === w[0] && activeWord?.[1] === w[1]}
                     isVariant={variantSet.has(i)}
                     highlightConfig={hlConfig ?? null}
+                    isHebrew={isHebrew}
                     onClick={() => onWordClick(w)}
                   />
                 );
@@ -1729,22 +1849,24 @@ function ChapterView({
 type CategoryStyle = typeof CATEGORY_CONFIG[string];
 
 function WordChip({
-  word, greekOnly, active, isVariant, highlightConfig, onClick,
+  word, greekOnly, active, isVariant, highlightConfig, isHebrew, onClick,
 }: {
   word: Word; greekOnly: boolean; active: boolean;
   isVariant: boolean;
   highlightConfig: CategoryStyle | null;
+  isHebrew?: boolean;
   onClick: () => void;
 }) {
   const [surface, strongs, morph] = word;
-  const lex = getLex(strongs);
-  const gloss = getWordGloss(lex, morph);
+  const gloss = isHebrew
+    ? (getHebrewLex(strongs).translit || "")
+    : getWordGloss(getLex(strongs), morph);
 
   return (
     <button
       onClick={onClick}
       className={cn(
-        "relative flex flex-col items-center gap-0.5 px-1.5 py-1 border transition-colors duration-100 group rounded-lg",
+        "relative flex flex-col items-center gap-1 px-2 py-1.5 border transition-colors duration-100 group rounded-lg",
         active
           ? "border-accent bg-accent/10"
           : highlightConfig
@@ -1757,17 +1879,23 @@ function WordChip({
       )}
       <span
         className={cn(
-          "text-xl leading-tight select-none",
+          "text-2xl leading-tight select-none",
           active ? "text-accent"
             : highlightConfig ? highlightConfig.text
             : "text-text-primary group-hover:text-accent"
         )}
-        style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+        style={{
+          fontFamily: isHebrew
+            ? "'Noto Serif Hebrew', 'SBL Hebrew', 'David', 'Times New Roman', serif"
+            : "Georgia, 'Times New Roman', serif",
+          direction: isHebrew ? "rtl" : "ltr",
+          lineHeight: isHebrew ? "1.6" : "1.3",
+        }}
       >
         {surface}
       </span>
       {!greekOnly && gloss && (
-        <span className={cn("text-[10px] leading-none max-w-[80px] truncate",
+        <span className={cn("text-[10px] leading-none max-w-[90px] truncate",
           highlightConfig ? highlightConfig.text + " opacity-80" : "text-text-muted")}>
           {gloss}
         </span>
@@ -1778,33 +1906,45 @@ function WordChip({
 
 /* ── WordDetail panel ───────────────────────────────────────── */
 function WordDetail({
-  word, activeTab, setActiveTab, textMode, book, chapter, verse, onClose, onNavigateOccurrence, onGrammarExample,
+  word, activeTab, setActiveTab, textMode, book, chapter, verse, isHebrew, onClose, onNavigateOccurrence, onGrammarExample,
 }: {
   word: Word; activeTab: ActiveTab; setActiveTab: (t: ActiveTab) => void;
   textMode: TextMode; book: string; chapter: string; verse: string;
+  isHebrew: boolean;
   onClose: () => void;
   onNavigateOccurrence: (book: string, ch: string, v: string) => void;
   onGrammarExample: (category: string, value: string) => void;
 }) {
   const [surface, strongs, morph] = word;
-  const lex = getLex(strongs);
-  const words = getWords(book, chapter, verse, textMode);
+  const lex = isHebrew ? getHebrewLex(strongs) : getLex(strongs);
+  const words = getWords(book, chapter, verse, textMode, isHebrew);
   const wordIdx = words.findIndex(w => w[0] === surface && w[1] === strongs && w[2] === morph);
-  const strongs_label = strongs ? `G${strongs}` : "LXX";
-  const inflected = getWordGloss(lex, morph);
+  const strongs_label = isHebrew ? `H${strongs}` : (strongs ? `G${strongs}` : "LXX");
+  const inflected = isHebrew ? (lex as HebrewLexEntry).translit || "" : getWordGloss(lex as LexEntry, morph);
+  const scriptFont = isHebrew
+    ? "'Noto Serif Hebrew', 'SBL Hebrew', 'David', 'Times New Roman', serif"
+    : "Georgia, 'Times New Roman', serif";
 
   return (
-    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden animate-slideInRight">
+    <div className="w-[340px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden animate-slideInRight">
       {/* Header */}
       <div className="px-4 pt-4 pb-3 border-b border-border-subtle flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2 mb-1">
-            <span className="text-2xl text-text-primary leading-none" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{surface}</span>
+          <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+            <span
+              className="text-3xl text-text-primary leading-none"
+              style={{ fontFamily: scriptFont, direction: isHebrew ? "rtl" : "ltr", lineHeight: isHebrew ? "1.5" : "1" }}
+            >{surface}</span>
             <span className="text-xs text-text-muted font-mono opacity-60">{strongs_label}</span>
+            {isHebrew && <span className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded font-semibold">Hebrew</span>}
           </div>
           {lex.lemma && (
-            <p className="text-sm text-accent" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
-              {lex.lemma}{lex.translit ? <span className="text-xs text-text-muted italic font-sans ml-2">{lex.translit}</span> : null}
+            <p className="text-sm text-accent" style={{ fontFamily: scriptFont, direction: isHebrew ? "rtl" : "ltr" }}>
+              {lex.lemma}
+              {(lex as LexEntry).translit
+                ? <span className="text-xs text-text-muted italic font-sans ml-2" style={{ direction: "ltr" }}>{(lex as LexEntry).translit}</span>
+                : null
+              }
             </p>
           )}
           {inflected && (
@@ -1829,13 +1969,19 @@ function WordDetail({
 
       <div className="flex-1 overflow-y-auto p-4">
         {activeTab === "parsing" && (
-          <ParsingTab surface={surface} strongs={strongs} morph={morph}
-            book={book} chapter={chapter} verse={verse} wordIdx={wordIdx}
-            onGrammarExample={onGrammarExample} />
+          isHebrew
+            ? <HebrewParsingTab surface={surface} strongs={strongs} morph={morph} />
+            : <ParsingTab surface={surface} strongs={strongs} morph={morph}
+                book={book} chapter={chapter} verse={verse} wordIdx={wordIdx}
+                onGrammarExample={onGrammarExample} />
         )}
-        {activeTab === "definition" && <DefinitionTab strongs={strongs} morph={morph} />}
+        {activeTab === "definition" && (
+          isHebrew
+            ? <HebrewDefinitionTab strongs={strongs} />
+            : <DefinitionTab strongs={strongs} morph={morph} />
+        )}
         {activeTab === "occurrences" && (
-          <OccurrencesTab strongs={strongs} textMode={textMode} onNavigate={onNavigateOccurrence} />
+          <OccurrencesTab strongs={strongs} textMode={textMode} isHebrew={isHebrew} onNavigate={onNavigateOccurrence} />
         )}
       </div>
     </div>
@@ -1976,19 +2122,91 @@ function DefinitionTab({ strongs, morph }: { strongs: number; morph: string }) {
   );
 }
 
+/* ── HebrewParsingTab ────────────────────────────────────────── */
+function HebrewParsingTab({ surface, strongs, morph }: { surface: string; strongs: number; morph: string }) {
+  const rows: HebrewMorphRow[] = decodeHebrewMorph(morph);
+  if (!rows.length) {
+    return <p className="text-sm text-text-muted opacity-60">No parsing data for &ldquo;{morph || surface}&rdquo;.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-0">
+      {rows.map((row, i) => (
+        <div key={i} className="flex items-start justify-between py-2 border-b border-border-subtle/50 last:border-0">
+          <span className="text-xs text-text-muted w-28 shrink-0">{row.label}</span>
+          <div className="text-right min-w-0 flex-1 ml-2">
+            <span className="text-sm text-text-primary font-medium">{row.value}</span>
+            {row.desc && <p className="text-xs text-text-muted mt-0.5">{row.desc}</p>}
+          </div>
+        </div>
+      ))}
+      <div className="mt-3 pt-3 border-t border-border-subtle/50">
+        <p className="text-[10px] text-text-muted uppercase tracking-widest mb-1">Strong&apos;s</p>
+        <p className="text-xs font-mono text-text-muted">H{strongs}</p>
+      </div>
+      <div className="mt-2">
+        <p className="text-[10px] text-text-muted uppercase tracking-widest mb-1">Morph Code</p>
+        <p className="text-xs font-mono text-text-muted opacity-60">{morph || "—"}</p>
+      </div>
+    </div>
+  );
+}
+
+/* ── HebrewDefinitionTab ─────────────────────────────────────── */
+function HebrewDefinitionTab({ strongs }: { strongs: number }) {
+  const lex = getHebrewLex(strongs);
+  if (!lex.lemma && !lex.brief && !lex.strongs_def) {
+    return <p className="text-sm text-text-muted opacity-60">No definition found (H{strongs}).</p>;
+  }
+  const quickClean = (lex.brief || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const sections: { label: string; content: string }[] = [];
+  if (lex.strongs_def) sections.push({
+    label: "Strong's",
+    content: lex.strongs_def + (lex.kjv_def ? `<div style="opacity:.65;margin-top:6px;font-size:.78rem;font-style:italic">KJV glosses: ${lex.kjv_def}</div>` : ""),
+  });
+  if (lex.deriv) sections.push({ label: "Etymology", content: lex.deriv });
+
+  return (
+    <div className="flex flex-col gap-4">
+      {quickClean && (
+        <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl">
+          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">Quick Definition</p>
+          <p className="text-sm text-text-primary leading-relaxed italic">&ldquo;{quickClean}&rdquo;</p>
+        </div>
+      )}
+      {lex.lemma && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1">Hebrew Lemma</p>
+          <p className="text-xl text-text-primary"
+            style={{ fontFamily: "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif", direction: "rtl" }}>
+            {lex.lemma}
+          </p>
+          {lex.translit && <p className="text-sm text-text-muted italic mt-1">{lex.translit}</p>}
+        </div>
+      )}
+      {sections.map((s, i) => (
+        <div key={i}>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">{s.label}</p>
+          <div className="text-sm text-text-primary leading-relaxed" dangerouslySetInnerHTML={{ __html: s.content }} />
+          {i < sections.length - 1 && <div className="mt-4 border-b border-border-subtle/50" />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ── OccurrencesTab ─────────────────────────────────────────── */
-function OccurrencesTab({ strongs, textMode, onNavigate }: {
-  strongs: number; textMode: TextMode;
+function OccurrencesTab({ strongs, textMode, isHebrew, onNavigate }: {
+  strongs: number; textMode: TextMode; isHebrew: boolean;
   onNavigate: (book: string, ch: string, v: string) => void;
 }) {
   const [expandedBook, setExpandedBook] = useState<string | null>(null);
-  const occ = getOccurrences(strongs, textMode);
+  const occ = getOccurrences(strongs, textMode, isHebrew);
   if (!occ.total) return <p className="text-sm text-text-muted opacity-60">No occurrences found.</p>;
-  const bookList = getBookOrder(textMode).filter(b => occ.books[b]);
+  const bookList = getBookOrder(textMode, isHebrew).filter(b => occ.books[b]);
   return (
     <div>
       <p className="text-xs text-text-muted mb-3">
-        Appears <span className="text-accent font-semibold">{occ.total}</span>× in Rhema
+        Appears <span className="text-accent font-semibold">{occ.total}</span>× in {isHebrew ? "Hebrew OT" : "Rhema"}
       </p>
       <div className="flex flex-col gap-0.5">
         {bookList.map(bk => (
@@ -2001,7 +2219,7 @@ function OccurrencesTab({ strongs, textMode, onNavigate }: {
               <span className="text-accent">{occ.books[bk]}×</span>
             </button>
             {expandedBook === bk && (
-              <BookOccurrences book={bk} strongs={strongs} textMode={textMode}
+              <BookOccurrences book={bk} strongs={strongs} textMode={textMode} isHebrew={isHebrew}
                 onNavigate={(ch, v) => onNavigate(bk, ch, v)} />
             )}
           </div>
@@ -2011,12 +2229,16 @@ function OccurrencesTab({ strongs, textMode, onNavigate }: {
   );
 }
 
-function BookOccurrences({ book, strongs, textMode, onNavigate }: {
-  book: string; strongs: number; textMode: TextMode;
+function BookOccurrences({ book, strongs, textMode, isHebrew, onNavigate }: {
+  book: string; strongs: number; textMode: TextMode; isHebrew: boolean;
   onNavigate: (ch: string, v: string) => void;
 }) {
-  const text = getText(textMode);
-  const bookText = text[book] || {};
+  const bookText = isHebrew && window.RhemaOTHebrew
+    ? (window.RhemaOTHebrew.text[book] || {})
+    : (getText(textMode)[book] || {});
+  const scriptFont = isHebrew
+    ? "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif"
+    : "Georgia, 'Times New Roman', serif";
   const refs: { ch: string; v: string; words: Word[] }[] = [];
   for (const ch of Object.keys(bookText).sort((a, b) => Number(a) - Number(b))) {
     for (const v of Object.keys(bookText[ch]).sort((a, b) => Number(a) - Number(b))) {
@@ -2029,12 +2251,13 @@ function BookOccurrences({ book, strongs, textMode, onNavigate }: {
       {refs.map(({ ch, v, words }) => {
         const preview = words.map((w: Word) =>
           w[1] === strongs ? `<span style="color:#c9a84c;font-weight:600">${w[0]}</span>` : w[0]
-        ).join(" ");
+        ).join(isHebrew ? "‏ " : " ");
         return (
           <button key={`${ch}:${v}`} onClick={() => onNavigate(ch, v)}
             className="w-full text-left px-2 py-1.5 hover:bg-bg-elevated transition-colors border-b border-border-subtle/30 last:border-0">
             <p className="text-xs text-accent font-semibold mb-0.5">{ch}:{v}</p>
-            <p className="text-xs text-text-muted leading-relaxed" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
+            <p className="text-sm text-text-muted leading-relaxed"
+              style={{ fontFamily: scriptFont, direction: isHebrew ? "rtl" : "ltr" }}
               dangerouslySetInnerHTML={{ __html: preview }} />
           </button>
         );
@@ -2106,33 +2329,60 @@ function CrossRefsPanel({ book, chapter, verse, crossRefs, onClose, onNavigate, 
 /* ── WandPopup ──────────────────────────────────────────────── */
 function WandPopup({
   syntaxMode, fullChapter, greekOnly, showEnglish, textMode, showHighlighter, intendedCount,
-  onToggleSyntax, onToggleChapter, onToggleGreekOnly, onToggleEnglish, onToggleTextMode, onToggleHighlight,
+  isOTBook: isOT, hebrewMode, hebrewAvailable: hebAvail,
+  onToggleSyntax, onToggleChapter, onToggleGreekOnly, onToggleEnglish, onToggleTextMode, onToggleHighlight, onToggleHebrew,
 }: {
   syntaxMode: boolean; fullChapter: boolean; greekOnly: boolean; showEnglish: boolean; textMode: TextMode;
   showHighlighter: boolean; intendedCount: number;
+  isOTBook: boolean; hebrewMode: boolean; hebrewAvailable: boolean;
   onToggleSyntax: () => void; onToggleChapter: () => void; onToggleGreekOnly: () => void;
   onToggleEnglish: () => void; onToggleTextMode: () => void; onToggleHighlight: () => void;
+  onToggleHebrew: () => void;
 }) {
+  const isHebrew = hebrewMode && isOT && hebAvail;
   return (
-    <div className="absolute right-0 top-full mt-1 w-56 bg-bg-surface border border-border-subtle shadow-2xl z-[39] py-1.5 rounded-xl overflow-hidden">
-      <WandItem active={syntaxMode} label="Syntax Diagram" desc="See clause structure & grammar roles" onClick={onToggleSyntax} />
+    <div className="absolute right-0 top-full mt-1 w-60 bg-bg-surface border border-border-subtle shadow-2xl z-[39] py-1.5 rounded-xl overflow-hidden">
+      {/* Hebrew / LXX toggle for OT books */}
+      {isOT && hebAvail && (
+        <>
+          <WandItem
+            active={hebrewMode}
+            label={hebrewMode ? "Hebrew OT" : "LXX (Greek OT)"}
+            desc={hebrewMode ? "Showing Hebrew Masoretic Text" : "Showing Septuagint Greek"}
+            onClick={onToggleHebrew}
+          />
+          <div className="my-1 border-t border-border-subtle/60" />
+        </>
+      )}
+      {/* Syntax only available for Greek NT */}
+      {!isHebrew && (
+        <WandItem active={syntaxMode} label="Syntax Diagram" desc="See clause structure & grammar roles" onClick={onToggleSyntax} />
+      )}
       <div className="my-1 border-t border-border-subtle/60" />
-      <WandItem active={greekOnly} label="Greek Only" desc="Hide word glosses beneath text" onClick={onToggleGreekOnly} />
+      <WandItem
+        active={greekOnly}
+        label={isHebrew ? "Hebrew Only" : "Greek Only"}
+        desc="Hide word glosses beneath text"
+        onClick={onToggleGreekOnly}
+      />
       <WandItem active={fullChapter} label="Full Chapter" desc="Show all verses at once" onClick={onToggleChapter} />
       {!greekOnly && (
         <WandItem
           active={showEnglish}
           label={`English (${textMode === "critical" ? "BSB" : "MSB"})`}
-          desc="Show translation below Greek"
+          desc="Show translation below text"
           onClick={onToggleEnglish}
         />
       )}
-      <WandItem
-        active={textMode === "critical"}
-        label={textMode === "critical" ? "Critical Text" : "Majority Text"}
-        desc={textMode === "critical" ? "Currently: SBL Critical NT" : "Currently: Byzantine Majority"}
-        onClick={onToggleTextMode}
-      />
+      {/* Text mode toggle only for NT */}
+      {!isOT && (
+        <WandItem
+          active={textMode === "critical"}
+          label={textMode === "critical" ? "Critical Text" : "Majority Text"}
+          desc={textMode === "critical" ? "Currently: SBL Critical NT" : "Currently: Byzantine Majority"}
+          onClick={onToggleTextMode}
+        />
+      )}
       <div className="my-1 border-t border-border-subtle/60" />
       <WandItem
         active={showHighlighter}
@@ -2171,26 +2421,29 @@ function WandItem({ active, label, desc, onClick }: {
 
 /* ── HighlighterBar ─────────────────────────────────────────── */
 const HL_SHORT: Record<string, string> = {
-  V: "Verbs", N: "Nouns", ADJ: "Adj", T: "Art",
+  V: "Verbs", N: "Nouns", ADJ: "Adj", T: "Art/Part",
   PRON: "Pron", PREP: "Prep", CONJ: "Conj", ADV: "Adv", PART: "Part",
+  Np: "Proper", A: "Adj", P: "Pron", R: "Prep", C: "Conj", D: "Adv", S: "Suffix",
 };
 
-function HighlighterBar({ intendedHighlights, activeHighlights, versePosCats, shaking, onToggle, onClearAll, onClose }: {
+function HighlighterBar({ intendedHighlights, activeHighlights, versePosCats, shaking, isHebrew, onToggle, onClearAll, onClose }: {
   intendedHighlights: Set<string>;
   activeHighlights: Set<string>;
   versePosCats: Set<string>;
   shaking: string | null;
+  isHebrew: boolean;
   onToggle: (cat: string) => void;
   onClearAll: () => void;
   onClose: () => void;
 }) {
+  const catConfig = isHebrew ? HEBREW_CATEGORY_CONFIG : CATEGORY_CONFIG;
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-border-subtle bg-bg-elevated/40 shrink-0 overflow-x-auto">
       <span className="text-[10px] font-semibold text-text-muted uppercase tracking-widest shrink-0 select-none">
         Highlight
       </span>
       <div className="flex items-center gap-1.5 min-w-0">
-        {Object.entries(CATEGORY_CONFIG).map(([cat, cfg]) => {
+        {Object.entries(catConfig).map(([cat, cfg]) => {
           const inVerse = versePosCats.has(cat);
           const isActive = activeHighlights.has(cat);
           const isIntended = intendedHighlights.has(cat);
@@ -2233,22 +2486,57 @@ function HighlighterBar({ intendedHighlights, activeHighlights, versePosCats, sh
   );
 }
 
+/* ── Hebrew lexicon search ─────────────────────────────────── */
+function searchHebrewLexicon(query: string): Array<{ strongs: number; lex: HebrewLexEntry }> {
+  if (!query.trim() || !window.RhemaHebrewLexicon) return [];
+  const isHebrew = /[א-׿יִ-ﭏ]/.test(query);
+  const q = query.toLowerCase();
+  const prefix: Array<{ strongs: number; lex: HebrewLexEntry }> = [];
+  const contains: Array<{ strongs: number; lex: HebrewLexEntry }> = [];
+  const defMatch: Array<{ strongs: number; lex: HebrewLexEntry }> = [];
+  for (const [key, lex] of Object.entries(window.RhemaHebrewLexicon)) {
+    const entry = { strongs: Number(key), lex };
+    if (isHebrew) {
+      const lemma = lex.lemma || "";
+      if (lemma.startsWith(query)) { prefix.push(entry); continue; }
+      if (lemma.includes(query)) { contains.push(entry); continue; }
+    } else {
+      const trans = (lex.translit || "").toLowerCase();
+      const brief = (lex.brief || "").replace(/<[^>]+>/g, "").toLowerCase();
+      if (trans.startsWith(q)) { prefix.push(entry); continue; }
+      if (trans.includes(q)) { contains.push(entry); continue; }
+      if (q.length >= 3 && brief.includes(q)) defMatch.push(entry);
+    }
+  }
+  return [...prefix, ...contains, ...defMatch].slice(0, 30);
+}
+
 /* ── WordLibraryPanel ───────────────────────────────────────── */
 const GREEK_KEYS = ["α","β","γ","δ","ε","ζ","η","θ","ι","κ","λ","μ","ν","ξ","ο","π","ρ","σ","τ","υ","φ","χ","ψ","ω"];
+const HEBREW_KEYS = ["א","ב","ג","ד","ה","ו","ז","ח","ט","י","כ","ל","מ","נ","ס","ע","פ","צ","ק","ר","ש","ת"];
 
-function WordLibraryPanel({ query, setQuery, loaded, onSelectLex, onSelectForm, onClose }: {
+function WordLibraryPanel({ query, setQuery, loaded, isHebrew, onSelectLex, onSelectForm, onClose }: {
   query: string;
   setQuery: (q: string) => void;
   loaded: boolean;
-  onSelectLex: (strongs: number, lex: LexEntry) => void;
+  isHebrew: boolean;
+  onSelectLex: (strongs: number, lex: LexEntry | HebrewLexEntry) => void;
   onSelectForm: (strongs: number, surface: string, morph: string) => void;
   onClose: () => void;
 }) {
   const [showKeyboard, setShowKeyboard] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const lexResults = useMemo(() => (loaded ? searchLexicon(query) : []), [loaded, query]);
-  const ntForms    = useMemo(() => (loaded ? scanNTForms(query) : []), [loaded, query]);
+  const lexResults    = useMemo(() => (!isHebrew && loaded ? searchLexicon(query) : []), [isHebrew, loaded, query]);
+  const ntForms       = useMemo(() => (!isHebrew && loaded ? scanNTForms(query) : []), [isHebrew, loaded, query]);
+  const hebLexResults = useMemo(() => (isHebrew && loaded ? searchHebrewLexicon(query) : []), [isHebrew, loaded, query]);
+
+  const scriptFont = isHebrew
+    ? "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif"
+    : "Georgia, 'Times New Roman', serif";
+  const keys = isHebrew ? HEBREW_KEYS : GREEK_KEYS;
+  const keyLabel = isHebrew ? "א" : "α";
+  const keyTitle = isHebrew ? "Hebrew keyboard" : "Greek keyboard";
 
   function insertChar(ch: string) {
     setQuery(query + ch);
@@ -2260,35 +2548,41 @@ function WordLibraryPanel({ query, setQuery, loaded, onSelectLex, onSelectForm, 
   }
 
   return (
-    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
-      <PanelHeader title="Word Library" onClose={onClose} />
+    <div className="w-[340px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+      <PanelHeader
+        title={isHebrew ? "Hebrew Word Library" : "Word Library"}
+        onClose={onClose}
+      />
       <div className="px-3 py-2.5 border-b border-border-subtle flex flex-col gap-2 shrink-0">
         <div className="flex items-center gap-1.5">
           <input
             ref={inputRef}
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Greek (ἀγαπ…), translit, or meaning…"
-            className="flex-1 h-8 bg-bg-elevated border border-border-subtle px-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent min-w-0"
+            placeholder={isHebrew ? "Hebrew (שׁלם…), translit, or meaning…" : "Greek (ἀγαπ…), translit, or meaning…"}
+            className="flex-1 h-8 bg-bg-elevated border border-border-subtle px-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent min-w-0 rounded-lg"
+            style={{ direction: isHebrew ? "rtl" : "ltr" }}
             autoFocus
           />
           <button
             onClick={() => setShowKeyboard(v => !v)}
-            title="Greek keyboard"
-            className={cn("h-8 px-2.5 border text-base font-serif shrink-0 transition-colors",
+            title={keyTitle}
+            className={cn("h-8 px-2.5 border text-base shrink-0 transition-colors rounded-lg",
               showKeyboard ? "border-accent text-accent bg-accent/10" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}
-          >α</button>
+            style={{ fontFamily: scriptFont }}
+          >{keyLabel}</button>
         </div>
         {showKeyboard && (
           <div className="flex flex-wrap gap-0.5">
-            {GREEK_KEYS.map(ch => (
+            {keys.map(ch => (
               <button key={ch} onClick={() => insertChar(ch)}
-                className="w-[26px] h-[26px] flex items-center justify-center border border-border-subtle text-text-primary text-sm font-serif hover:bg-bg-elevated hover:border-accent transition-colors">
+                className="w-[26px] h-[26px] flex items-center justify-center border border-border-subtle text-text-primary text-sm hover:bg-bg-elevated hover:border-accent transition-colors rounded"
+                style={{ fontFamily: scriptFont }}>
                 {ch}
               </button>
             ))}
             <button onClick={doBackspace}
-              className="px-2 h-[26px] flex items-center justify-center border border-border-subtle text-text-muted text-xs hover:bg-bg-elevated hover:border-[#3a4052] transition-colors ml-0.5">
+              className="px-2 h-[26px] flex items-center justify-center border border-border-subtle text-text-muted text-xs hover:bg-bg-elevated hover:border-[#3a4052] transition-colors ml-0.5 rounded">
               ⌫
             </button>
           </div>
@@ -2296,9 +2590,36 @@ function WordLibraryPanel({ query, setQuery, loaded, onSelectLex, onSelectForm, 
       </div>
       <div className="flex-1 overflow-y-auto">
         {!query.trim() ? (
-          <p className="text-xs text-text-muted opacity-60 p-4 leading-relaxed">Search by Greek (use the α keyboard or type with accents), transliteration, or English meaning.</p>
+          <p className="text-xs text-text-muted opacity-60 p-4 leading-relaxed">
+            {isHebrew
+              ? "Search by Hebrew (use the א keyboard), transliteration, or English meaning."
+              : "Search by Greek (use the α keyboard or type with accents), transliteration, or English meaning."
+            }
+          </p>
+        ) : isHebrew ? (
+          hebLexResults.length === 0
+            ? <p className="text-xs text-text-muted opacity-60 p-4">No Hebrew results for &ldquo;{query}&rdquo;.</p>
+            : (
+              <div>
+                <p className="text-[9px] font-bold text-text-muted uppercase tracking-widest px-4 py-1.5 border-b border-border-subtle/60 bg-bg-elevated/60 sticky top-0">Hebrew Lexicon</p>
+                {hebLexResults.map(({ strongs, lex }) => {
+                  const quick = (lex.brief || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().split(/[;,]/)[0].trim().slice(0, 60);
+                  return (
+                    <button key={strongs} onClick={() => onSelectLex(strongs, lex)}
+                      className="w-full text-left px-4 py-2.5 hover:bg-bg-elevated border-b border-border-subtle/40 transition-colors">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-lg text-text-primary" style={{ fontFamily: scriptFont, direction: "rtl" }}>{lex.lemma || ""}</span>
+                        {lex.translit && <span className="text-xs text-text-muted italic">{lex.translit}</span>}
+                        <span className="ml-auto text-[10px] text-text-muted/70 shrink-0">H{strongs}</span>
+                      </div>
+                      {quick && <p className="text-[10px] text-text-muted truncate">{quick}</p>}
+                    </button>
+                  );
+                })}
+              </div>
+            )
         ) : ntForms.length === 0 && lexResults.length === 0 ? (
-          <p className="text-xs text-text-muted opacity-60 p-4">No results for "{query}".</p>
+          <p className="text-xs text-text-muted opacity-60 p-4">No results for &ldquo;{query}&rdquo;.</p>
         ) : (
           <>
             {ntForms.length > 0 && (
@@ -2312,7 +2633,7 @@ function WordLibraryPanel({ query, setQuery, loaded, onSelectLex, onSelectForm, 
                     <button key={i} onClick={() => onSelectForm(f.strongs, f.surface, f.morph)}
                       className="w-full text-left px-4 py-2.5 hover:bg-bg-elevated border-b border-border-subtle/40 transition-colors">
                       <div className="flex items-baseline gap-2 mb-0.5">
-                        <span className="text-base text-text-primary" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{f.surface}</span>
+                        <span className="text-xl text-text-primary" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{f.surface}</span>
                         {lex.translit && <span className="text-xs text-text-muted italic">{lex.translit}</span>}
                         <span className="ml-auto text-[10px] text-text-muted/70 shrink-0">{f.count}×</span>
                       </div>
@@ -2334,7 +2655,7 @@ function WordLibraryPanel({ query, setQuery, loaded, onSelectLex, onSelectForm, 
                     <button key={strongs} onClick={() => onSelectLex(strongs, lex)}
                       className="w-full text-left px-4 py-2.5 hover:bg-bg-elevated border-b border-border-subtle/40 transition-colors">
                       <div className="flex items-baseline gap-2 mb-0.5">
-                        <span className="text-base text-text-primary" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{lex.lemma || ""}</span>
+                        <span className="text-xl text-text-primary" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{lex.lemma || ""}</span>
                         {lex.translit && <span className="text-xs text-text-muted italic">{lex.translit}</span>}
                         <span className="ml-auto text-[10px] text-text-muted/70 shrink-0">G{strongs}</span>
                       </div>

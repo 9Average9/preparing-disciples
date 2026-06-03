@@ -188,3 +188,124 @@ export function normalizePosKey(morphCode: string): string | null {
   if (['PART','PRT','INJ','COND'].includes(raw)) return 'PART';
   return raw;
 }
+
+/* ── Hebrew OSHB morphology decoder ───────────────────────────── */
+
+const HEBREW_VERB_STEMS: Record<string, string> = {
+  q:'Qal', N:'Niphal', p:'Piel', P:'Pual', h:'Hiphil', H:'Hophal', t:'Hithpael',
+  o:'Polel', O:'Polal', r:'Hithpolel', m:'Poel', M:'Poal',
+  k:'Palel', K:'Pulal', D:'Nithpael', f:'Hithpalpel',
+  l:'Pilpel', L:'Polpal', Q:'Pealal', v:'Hishtaphel',
+  w:'Nithpalel', y:'Nithpoel', z:'Hithpoel', u:'Hothpaal', c:'Tiphil',
+};
+
+const HEBREW_VERB_FORMS: Record<string, { l: string; d: string }> = {
+  p: { l:'Perfect (Qatal)',        d:'completed action; expresses certainty or past events' },
+  q: { l:'Imperfect (Yiqtol)',     d:'incomplete action; future, habitual, or modal' },
+  w: { l:'Waw-Consecutive',        d:'sequential narrative; drives the story forward' },
+  v: { l:'Imperative',             d:'direct command or strong request' },
+  r: { l:'Active Participle',      d:'ongoing action or characteristic; often substantive' },
+  s: { l:'Passive Participle',     d:'state resulting from a completed action' },
+  a: { l:'Infinitive Absolute',    d:'emphasizes the verbal idea; often paired with a finite verb' },
+  c: { l:'Infinitive Construct',   d:'verbal noun; like English "to ___" or "the ___ing"' },
+  e: { l:'Jussive',                d:'third-person volitional — let him / may he' },
+  i: { l:'Cohortative',            d:'first-person volitional — let us / I will' },
+};
+
+const HEBREW_GENDERS: Record<string, string> = { m:'Masculine', f:'Feminine', b:'Both', c:'Common' };
+const HEBREW_NUMBERS: Record<string, string> = { s:'Singular', p:'Plural', d:'Dual' };
+const HEBREW_STATES: Record<string, { l: string; d: string }> = {
+  a: { l:'Absolute',   d:'independent; noun stands alone' },
+  c: { l:'Construct',  d:'bound state; links to following noun ("of")' },
+  d: { l:'Determined', d:'definite/emphatic (mainly Aramaic)' },
+};
+const HEBREW_NOUN_TYPES: Record<string, string> = {
+  c:'Common Noun', g:'Gentilic Noun', p:'Proper Noun',
+};
+const HEBREW_PERSON: Record<string, string> = {
+  '1':'1st Person', '2':'2nd Person', '3':'3rd Person', c:'Common Person',
+};
+const HEBREW_PRON_TYPES: Record<string, string> = {
+  p:'Personal Pronoun', d:'Demonstrative Pronoun', r:'Relative Pronoun',
+  f:'Reflexive Pronoun', i:'Interrogative Pronoun', x:'Indefinite Pronoun',
+  e:'Pronominal Suffix',
+};
+const HEBREW_PARTICLE_TYPES: Record<string, string> = {
+  a:'Interrogative Particle', d:'Definite Article', e:'Demonstrative Particle',
+  f:'Exhortation Particle',  i:'Interjection',      k:'Comparative Particle',
+  l:'Directional He',        m:'Discourse Marker',  n:'Negative Particle',
+  o:'Other Particle',        r:'Relative Particle', s:'Exhortation Particle',
+};
+
+export interface HebrewMorphRow { label: string; value: string; desc: string }
+
+export function decodeHebrewMorph(code: string): HebrewMorphRow[] {
+  if (!code) return [];
+  const rows: HebrewMorphRow[] = [];
+  const pos = code[0];
+
+  if (pos === 'V') {
+    rows.push({ label:'Part of Speech', value:'Verb', desc:'' });
+    const stem = code[1]; const form = code[2];
+    const person = code[3]; const gender = code[4]; const number = code[5];
+    if (stem && HEBREW_VERB_STEMS[stem]) rows.push({ label:'Stem', value:HEBREW_VERB_STEMS[stem], desc:'' });
+    if (form) { const f = HEBREW_VERB_FORMS[form]; if (f) rows.push({ label:'Form', value:f.l, desc:f.d }); }
+    if (person && HEBREW_PERSON[person]) rows.push({ label:'Person', value:HEBREW_PERSON[person], desc:'' });
+    if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
+    if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
+  } else if (pos === 'N') {
+    const type = code[1]; const gender = code[2]; const number = code[3]; const state = code[4];
+    rows.push({ label:'Part of Speech', value:HEBREW_NOUN_TYPES[type] || 'Noun', desc:'' });
+    if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
+    if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
+    if (state) { const s = HEBREW_STATES[state]; if (s) rows.push({ label:'State', value:s.l, desc:s.d }); }
+  } else if (pos === 'A') {
+    rows.push({ label:'Part of Speech', value:'Adjective', desc:'' });
+    const gender = code[2]; const number = code[3]; const state = code[4];
+    if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
+    if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
+    if (state) { const s = HEBREW_STATES[state]; if (s) rows.push({ label:'State', value:s.l, desc:s.d }); }
+  } else if (pos === 'P') {
+    const type = code[1]; const person = code[2]; const gender = code[3]; const number = code[4];
+    rows.push({ label:'Part of Speech', value:HEBREW_PRON_TYPES[type] || 'Pronoun', desc:'' });
+    if (person && HEBREW_PERSON[person]) rows.push({ label:'Person', value:HEBREW_PERSON[person], desc:'' });
+    if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
+    if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
+  } else if (pos === 'R') {
+    rows.push({ label:'Part of Speech', value:'Preposition', desc:'' });
+    if (code[1] === 'd') rows.push({ label:'Note', value:'with Definite Article', desc:'' });
+  } else if (pos === 'C') {
+    rows.push({ label:'Part of Speech', value:'Conjunction', desc:'' });
+  } else if (pos === 'D') {
+    rows.push({ label:'Part of Speech', value:'Adverb', desc:'' });
+  } else if (pos === 'T') {
+    const label = code[1] ? (HEBREW_PARTICLE_TYPES[code[1]] || 'Particle') : 'Particle';
+    rows.push({ label:'Part of Speech', value:label, desc:'' });
+  } else if (pos === 'S') {
+    rows.push({ label:'Part of Speech', value:'Pronominal Suffix', desc:'' });
+    const person = code[2]; const gender = code[3]; const number = code[4];
+    if (person && HEBREW_PERSON[person]) rows.push({ label:'Person', value:HEBREW_PERSON[person], desc:'' });
+    if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
+    if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
+  } else {
+    rows.push({ label:'Morphology', value:code, desc:'' });
+  }
+  return rows;
+}
+
+/* Maps first letter of OSHB morph code → highlight category key */
+export function normalizeHebrewPosKey(morphCode: string): string | null {
+  if (!morphCode) return null;
+  const pos = morphCode[0];
+  // Map to match HEBREW_CATEGORY_CONFIG keys
+  if (pos === 'N') return morphCode[1] === 'p' ? 'Np' : 'N';
+  if (pos === 'A') return 'A';
+  if (pos === 'P') return 'P';
+  if (pos === 'V') return 'V';
+  if (pos === 'R') return 'R';
+  if (pos === 'C') return 'C';
+  if (pos === 'D') return 'D';
+  if (pos === 'T') return 'T';
+  if (pos === 'S') return 'S';
+  return null;
+}
