@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, Columns2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
@@ -54,7 +54,10 @@ interface LexEntry {
 interface HebrewLexEntry {
   lemma?: string;
   translit?: string;
+  pronounce?: string;
   brief?: string;
+  quick_def?: string;
+  extended?: string;
   strongs_def?: string;
   kjv_def?: string;
   deriv?: string;
@@ -72,7 +75,7 @@ const DATA_FILES_CORE = [
   "rhema-lexicon.js", "rhema-mm.js", "rhema-msb.js",
   "rhema-bsb.js", "rhema-syntax.js", "rhema-crossrefs.js",
 ];
-const HEBREW_BASE = "/rhema/";
+const HEBREW_BASE = "https://raw.githubusercontent.com/9Average9/Greek-Vocab/main/";
 const DATA_FILES_HEBREW = ["rhema-ot-hebrew.js", "rhema-hebrew-lexicon.js"];
 
 const CROSS_REF_LABELS: Record<string, string> = {
@@ -923,6 +926,8 @@ export default function RhemaPage() {
     return 3;
   });
   const [showFontPicker, setShowFontPicker] = useState(false);
+  const [englishMode, setEnglishMode] = useState(false);
+  const [phraseBuilderMode, setPhraseBuilderMode] = useState(false);
   const loadingRef = useRef(false);
 
   // Navigation history (persisted in localStorage)
@@ -1131,7 +1136,7 @@ export default function RhemaPage() {
 
   function jumpToHistoryStop(idx: number) {
     const stop = navHistory[idx];
-    setNavHistory(h => h.slice(0, idx));
+    // Don't truncate — all stops remain so the user can freely move between them
     setBook(stop.book); setChapter(stop.chapter); setVerse(stop.verse);
     setActiveWord(null);
   }
@@ -1179,7 +1184,7 @@ export default function RhemaPage() {
   const variantSet  = loaded ? getVariantSet(book, chapter, verse, textMode) : new Set<number>();
   const crossRefs   = loaded ? (window.RhemaCrossRefs?.[`${book} ${chapter}:${verse}`] || null) : null;
   const hasCrossRefs = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
-  const hasActiveMode = syntaxMode || fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0 || (isHebrew && hebrewMode);
+  const hasActiveMode = syntaxMode || fullChapter || greekOnly || textMode === "critical" || (!greekOnly && !showEnglish) || intendedHighlights.size > 0 || (isHebrew && hebrewMode) || englishMode || phraseBuilderMode;
 
   /* POS categories present in the current verse */
   const versePosCats = useMemo(() => {
@@ -1352,6 +1357,34 @@ export default function RhemaPage() {
 
           <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
+          {/* English-only reader */}
+          <button
+            onClick={() => { setEnglishMode(v => !v); setPhraseBuilderMode(false); setSyntaxMode(false); }}
+            title="English-only reader (BSB / MSB)"
+            className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors rounded-lg",
+              englishMode
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+            )}
+          >
+            <AlignLeft className="h-3 w-3" />
+            <span className="text-[10px] hidden sm:inline">English</span>
+          </button>
+
+          {/* Phrase / sentence structure builder */}
+          <button
+            onClick={() => { setPhraseBuilderMode(v => !v); setEnglishMode(false); setSyntaxMode(false); setFullChapter(false); }}
+            title="Phrase structure builder"
+            className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors rounded-lg",
+              phraseBuilderMode
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+            )}
+          >
+            <Columns2 className="h-3 w-3" />
+            <span className="text-[10px] hidden sm:inline">Phrase</span>
+          </button>
+
           {/* Font size picker */}
           <div className="relative z-[39]">
             <button
@@ -1467,6 +1500,17 @@ export default function RhemaPage() {
               book={book} chapter={chapter} verse={verse} textMode={textMode}
               onPhraseClick={(p) => { setSelectedSxPhrase(p); setActiveWord(null); setShowCrossRefs(false); setShowNotes(false); setShowLibrary(false); }}
               englishText={englishText} englishLabel={getEnglishLabel(textMode)}
+            />
+          ) : englishMode ? (
+            <EnglishReaderView
+              book={book} chapter={chapter} verse={verse}
+              textMode={textMode} fullChapter={fullChapter} fontSize={fontSize}
+              englishLabel={getEnglishLabel(textMode)}
+              onTextModeToggle={() => setTextMode(m => m === "critical" ? "majority" : "critical")}
+            />
+          ) : phraseBuilderMode ? (
+            <PhraseBuilderView
+              book={book} chapter={chapter} verse={verse} textMode={textMode}
             />
           ) : fullChapter ? (
             <ChapterView
@@ -1988,6 +2032,363 @@ function ChapterView({
   );
 }
 
+/* ── EnglishReaderView ──────────────────────────────────────── */
+function EnglishReaderView({
+  book, chapter, verse, textMode, fullChapter, fontSize, englishLabel, onTextModeToggle,
+}: {
+  book: string; chapter: string; verse: string; textMode: TextMode;
+  fullChapter: boolean; fontSize: FontSize; englishLabel: string;
+  onTextModeToggle: () => void;
+}) {
+  const bookName = BOOK_NAMES[book] || book;
+  const chapters = getChapters(book, textMode);
+  const verses   = fullChapter ? getVerses(book, chapter, textMode) : [verse];
+
+  const lineSize = fontSize === 1 ? "text-base" : fontSize === 2 ? "text-lg" : fontSize === 3 ? "text-xl" : fontSize === 4 ? "text-2xl" : "text-3xl";
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20">
+          <span className="text-xs font-semibold text-accent tracking-wide">
+            {bookName} {chapter}{fullChapter ? "" : `:${verse}`}
+          </span>
+          <span className="text-[10px] text-accent/60">{englishLabel}</span>
+        </div>
+        <button
+          onClick={onTextModeToggle}
+          className="text-[10px] px-2.5 py-1 border border-border-subtle rounded-lg text-text-muted hover:text-text-primary hover:border-[#3a4052] transition-colors"
+        >
+          Switch to {textMode === "critical" ? "MSB" : "BSB"}
+        </button>
+      </div>
+
+      {/* Verse text */}
+      {verses.map(v => {
+        const text = getEnglishText(book, chapter, v, textMode);
+        return (
+          <p key={v} className={cn(lineSize, "text-text-primary leading-relaxed mb-4")}>
+            {fullChapter && (
+              <span className="text-xs font-bold text-accent mr-2 select-none align-super">{v}</span>
+            )}
+            {text || <em className="text-text-muted opacity-50 text-base">No translation available for this passage.</em>}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ── PhraseBuilderView ──────────────────────────────────────── */
+interface PhraseRow {
+  id: string;
+  words: string[];
+  indent: number;      // 0–12, each level = 36px
+  verseLabel?: string; // shown as a small verse-number badge
+}
+
+/* Parse "Gen 5:8-13" / "John 3:16" / "1 Cor 13:1" etc. */
+function parsePhraseRef(input: string): { book: string; ch: string; startV: number; endV: number } | null {
+  const m = input.trim().match(/^(.+?)\s+(\d+):(\d+)(?:\s*-\s*(\d+))?$/i);
+  if (!m) return null;
+  const raw = m[1].toLowerCase().replace(/\s+/g, " ").trim();
+  const ch = m[2]; const startV = parseInt(m[3]); const endV = parseInt(m[4] || m[3]);
+  for (const [abbr, name] of Object.entries(BOOK_NAMES)) {
+    if (abbr.toLowerCase() === raw || name.toLowerCase() === raw ||
+        name.toLowerCase().startsWith(raw) || abbr.toLowerCase().startsWith(raw)) {
+      return { book: abbr, ch, startV, endV };
+    }
+  }
+  return null;
+}
+
+function buildPhraseRows(book: string, ch: string, startV: number, endV: number, mode: TextMode): PhraseRow[] {
+  const rows: PhraseRow[] = [];
+  for (let v = startV; v <= Math.min(endV, startV + 29); v++) {
+    const text = getEnglishText(book, ch, String(v), mode);
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length) rows.push({ id: `${v}-${Date.now()}`, words, indent: 0, verseLabel: String(v) });
+  }
+  return rows.length ? rows : [{ id: "0", words: [], indent: 0 }];
+}
+
+function PhraseBuilderView({
+  book, chapter, verse, textMode,
+}: {
+  book: string; chapter: string; verse: string; textMode: TextMode;
+}) {
+  const initialLabel = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+  const [refInput, setRefInput]   = useState(initialLabel);
+  const [refError, setRefError]   = useState("");
+  const [rows, setRows]           = useState<PhraseRow[]>(() => buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
+  const [activeLabel, setActiveLabel] = useState(initialLabel);
+
+  // 2-D pointer drag state
+  const dragData = useRef<{
+    rowIdx: number; startX: number; startY: number; startIndent: number;
+  } | null>(null);
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const [insertAt, setInsertAt]       = useState<number | null>(null);
+  const rowElsRef = useRef<(HTMLDivElement | null)[]>([]);
+
+  // Sync when the main nav changes
+  useEffect(() => {
+    const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+    setRefInput(label);
+    setActiveLabel(label);
+    setRows(buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
+    setRefError("");
+  }, [book, chapter, verse, textMode]);
+
+  /* ── Load a custom reference ── */
+  function loadRef() {
+    const parsed = parsePhraseRef(refInput);
+    if (!parsed) { setRefError("Couldn't parse reference. Try: \"Gen 5:8-13\""); return; }
+    const newRows = buildPhraseRows(parsed.book, parsed.ch, parsed.startV, parsed.endV, textMode);
+    if (!newRows[0].words.length) { setRefError("No English text found for that reference."); return; }
+    setRows(newRows);
+    setRefError("");
+    const end = parsed.startV === parsed.endV ? "" : `–${parsed.endV}`;
+    setActiveLabel(`${BOOK_NAMES[parsed.book] || parsed.book} ${parsed.ch}:${parsed.startV}${end}`);
+  }
+
+  /* ── Word split / merge ── */
+  function splitAt(rowIdx: number, wordIdx: number) {
+    if (wordIdx === 0) return;
+    setRows(prev => {
+      const row = prev[rowIdx];
+      const before: PhraseRow = { ...row, words: row.words.slice(0, wordIdx) };
+      const after: PhraseRow  = { id: `${Date.now()}`, words: row.words.slice(wordIdx), indent: row.indent + 1 };
+      const next = [...prev];
+      next.splice(rowIdx, 1, before, after);
+      return next;
+    });
+  }
+
+  function mergeUp(rowIdx: number) {
+    if (rowIdx === 0) return;
+    setRows(prev => {
+      const next = [...prev];
+      const merged: PhraseRow = { ...next[rowIdx - 1], words: [...next[rowIdx - 1].words, ...next[rowIdx].words] };
+      next.splice(rowIdx - 1, 2, merged);
+      return next;
+    });
+  }
+
+  /* ── 2-D pointer-based drag ── */
+  function calcInsertAt(clientY: number, excludeIdx: number): number {
+    const els = rowElsRef.current;
+    for (let i = 0; i < els.length; i++) {
+      if (i === excludeIdx) continue;
+      const rect = els[i]?.getBoundingClientRect();
+      if (rect && clientY < rect.top + rect.height / 2) return i;
+    }
+    return els.length;
+  }
+
+  function onGripPointerDown(e: React.PointerEvent, rowIdx: number) {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragData.current = { rowIdx, startX: e.clientX, startY: e.clientY, startIndent: rows[rowIdx].indent };
+    setDraggingIdx(rowIdx);
+    setInsertAt(null);
+  }
+
+  function onGripPointerMove(e: React.PointerEvent, rowIdx: number) {
+    const d = dragData.current;
+    if (!d || d.rowIdx !== rowIdx) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+
+    // Horizontal → update indent live
+    const newIndent = Math.max(0, Math.min(12, d.startIndent + Math.round(dx / 36)));
+    setRows(prev => {
+      if (prev[rowIdx].indent === newIndent) return prev;
+      const next = [...prev];
+      next[rowIdx] = { ...next[rowIdx], indent: newIndent };
+      return next;
+    });
+
+    // Vertical → show insertion indicator (don't reorder yet)
+    if (Math.abs(dy) > 8) setInsertAt(calcInsertAt(e.clientY, rowIdx));
+  }
+
+  function onGripPointerUp(e: React.PointerEvent, rowIdx: number) {
+    const d = dragData.current;
+    if (!d) return;
+    dragData.current = null;
+
+    // Apply vertical reorder
+    if (insertAt !== null && insertAt !== rowIdx) {
+      setRows(prev => {
+        const next = [...prev];
+        const [item] = next.splice(rowIdx, 1);
+        const target = insertAt > rowIdx ? insertAt - 1 : insertAt;
+        next.splice(target, 0, item);
+        return next;
+      });
+    }
+    setDraggingIdx(null);
+    setInsertAt(null);
+  }
+
+  const isEmpty = rows.every(r => r.words.length === 0);
+
+  return (
+    <div className="max-w-3xl mx-auto">
+      {/* ── Reference picker ── */}
+      <div className="mb-6 flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 shrink-0">
+            <Columns2 className="h-3 w-3 text-accent" />
+            <span className="text-xs font-semibold text-accent tracking-wide">{activeLabel}</span>
+            <span className="text-[10px] text-accent/60">Phrase Structure</span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-1 min-w-[240px]">
+            <input
+              value={refInput}
+              onChange={e => { setRefInput(e.target.value); setRefError(""); }}
+              onKeyDown={e => e.key === "Enter" && loadRef()}
+              placeholder="e.g. Gen 5:8-13 or John 3:16-17"
+              className="flex-1 h-7 bg-bg-elevated border border-border-subtle px-2.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
+            />
+            <button
+              onClick={loadRef}
+              className="h-7 px-3 text-xs border border-border-subtle text-text-muted hover:border-accent hover:text-accent transition-colors rounded-lg shrink-0"
+            >
+              Load
+            </button>
+            <button
+              onClick={() => {
+                const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+                setRefInput(label); setActiveLabel(label);
+                setRows(buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
+                setRefError("");
+              }}
+              className="h-7 px-2 text-xs border border-border-subtle text-text-muted hover:text-text-primary transition-colors rounded-lg shrink-0"
+              title="Reset to current verse"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+        {refError && <p className="text-xs text-red-400 pl-1">{refError}</p>}
+        <p className="text-[10px] text-text-muted opacity-40 pl-1">
+          Hover a row to reveal the drag handle · left/right = indent · up/down = reorder · click a word to split
+        </p>
+      </div>
+
+      {isEmpty && (
+        <p className="text-sm text-text-muted opacity-60">No English text found for this passage.</p>
+      )}
+
+      {/* ── Phrase rows ── */}
+      <div className="flex flex-col gap-px select-none">
+        {rows.map((row, rIdx) => (
+          <div key={row.id}>
+            {/* Drop indicator line above this row */}
+            {insertAt === rIdx && draggingIdx !== rIdx && (
+              <div className="relative h-0.5 mx-2 mb-0.5 overflow-visible">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-accent to-transparent rounded-full" />
+                <div className="absolute inset-0 bg-accent/40 blur-[3px] rounded-full" />
+              </div>
+            )}
+            <div
+              ref={el => { rowElsRef.current[rIdx] = el; }}
+              className={cn(
+                "flex items-center gap-2 py-1.5 rounded-xl group transition-all duration-150",
+                draggingIdx === rIdx
+                  ? "opacity-30 scale-[0.97] ring-1 ring-accent/20 bg-bg-elevated/60 shadow-lg shadow-accent/5"
+                  : "hover:bg-bg-elevated/20"
+              )}
+              style={{ paddingLeft: `${row.indent * 36}px` }}
+            >
+              {/* Verse label badge */}
+              {row.verseLabel && (
+                <span className="text-[10px] font-bold text-accent/60 w-5 text-right shrink-0 select-none">
+                  {row.verseLabel}
+                </span>
+              )}
+
+              {/* 2D grip handle — 6-dot modern grid */}
+              <div
+                className="flex items-center justify-center h-7 w-5 cursor-grab active:cursor-grabbing shrink-0 touch-none"
+                title="Drag left/right to indent · drag up/down to reorder"
+                onPointerDown={e => onGripPointerDown(e, rIdx)}
+                onPointerMove={e => onGripPointerMove(e, rIdx)}
+                onPointerUp={e => onGripPointerUp(e, rIdx)}
+              >
+                <svg
+                  viewBox="0 0 8 12" width="8" height="12"
+                  className="opacity-0 group-hover:opacity-50 transition-all duration-200 group-hover:scale-110"
+                  style={{ fill: "var(--color-text-muted, #888)" }}
+                >
+                  <circle cx="2" cy="2"  r="1.2" />
+                  <circle cx="6" cy="2"  r="1.2" />
+                  <circle cx="2" cy="6"  r="1.2" />
+                  <circle cx="6" cy="6"  r="1.2" />
+                  <circle cx="2" cy="10" r="1.2" />
+                  <circle cx="6" cy="10" r="1.2" />
+                </svg>
+              </div>
+
+              {/* Words */}
+              <div className="flex flex-wrap gap-x-[0.32em] gap-y-1 items-baseline">
+                {row.words.map((word, wIdx) => {
+                  const isFirst = wIdx === 0;
+                  const canMerge = isFirst && rIdx > 0;
+                  const canSplit = !isFirst;
+                  return (
+                    <button
+                      key={wIdx}
+                      onClick={() => { if (canSplit) splitAt(rIdx, wIdx); else if (canMerge) mergeUp(rIdx); }}
+                      title={canSplit ? "Split here — new row below" : canMerge ? "Merge with row above" : ""}
+                      className={cn(
+                        "text-xl leading-snug font-serif transition-colors",
+                        canSplit && "hover:text-accent cursor-pointer",
+                        canMerge && "hover:text-orange-400 cursor-pointer",
+                        !canSplit && !canMerge && "cursor-default text-text-primary"
+                      )}
+                    >
+                      {word}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Merge-up pill */}
+              {rIdx > 0 && (
+                <button
+                  onClick={() => mergeUp(rIdx)}
+                  className="opacity-0 group-hover:opacity-30 hover:!opacity-100 text-[9px] px-2 py-0.5 bg-bg-elevated border border-border-subtle rounded-full text-text-muted hover:text-orange-400 hover:border-orange-400/40 hover:bg-orange-400/5 ml-1 shrink-0 transition-all duration-150"
+                >
+                  ↑ merge
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {/* Drop indicator at the very bottom */}
+        {insertAt === rows.length && (
+          <div className="relative h-0.5 mx-2 mt-0.5 overflow-visible">
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-accent to-transparent rounded-full" />
+            <div className="absolute inset-0 bg-accent/40 blur-[3px] rounded-full" />
+          </div>
+        )}
+      </div>
+
+      {/* Legend */}
+      <div className="mt-8 pt-4 border-t border-border-subtle/40 flex flex-wrap gap-x-5 gap-y-1 text-[10px] text-text-muted opacity-50">
+        <span><span className="text-accent">click word</span> → split, new row below</span>
+        <span><span className="text-orange-400">click 1st word</span> → merge with row above</span>
+        <span><span className="text-text-primary">drag grip ↕</span> → reorder rows</span>
+        <span><span className="text-text-primary">drag grip ↔</span> → indent row</span>
+      </div>
+    </div>
+  );
+}
+
 /* ── WordChip ───────────────────────────────────────────────── */
 type CategoryStyle = typeof CATEGORY_CONFIG[string];
 
@@ -2232,22 +2633,42 @@ function DefinitionTab({ strongs, morph }: { strongs: number; morph: string }) {
   const quickClean = quickRaw.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
   const quickDisplay = inflected || quickClean;
 
-  const sections: { label: string; content: string }[] = [];
-  if (lex.abbott_smith) sections.push({ label: "Abbott-Smith", content: lex.abbott_smith });
-  if (lex.moulton_milligan) sections.push({ label: "Moulton-Milligan", content: lex.moulton_milligan });
-  if (lex.extended || lex.brief) sections.push({ label: "Dodson", content: (lex.extended || lex.brief)! });
+  // KJV semantic range chips
+  const kjvGlosses = (lex.kjv_def || "")
+    .split(",")
+    .map(g => g.replace(/[()]/g, "").replace(/^[X+]\s*/, "").trim())
+    .filter(g => g.length > 1 && !/^\d+$/.test(g));
+
+  const sections: { label: string; content: string; note?: string }[] = [];
+  if (lex.abbott_smith) sections.push({
+    label: "Abbott-Smith",
+    content: lex.abbott_smith,
+    note: "Manual Greek Lexicon of the NT (1922) — scholarly, concise definitions with LXX usage",
+  });
+  if (lex.moulton_milligan) sections.push({
+    label: "Moulton & Milligan",
+    content: lex.moulton_milligan,
+    note: "Vocabulary of the Greek NT (1930) — how this word was used in everyday papyri & documents",
+  });
+  if (lex.extended || lex.brief) sections.push({
+    label: "Dodson",
+    content: (lex.extended || lex.brief)!,
+    note: "Public domain Greek–English lexicon",
+  });
   if (lex.strongs_def) sections.push({
     label: "Strong's",
-    content: lex.strongs_def + (lex.kjv_def ? `<div style="opacity:.65;margin-top:6px;font-size:.78rem;font-style:italic">KJV glosses: ${lex.kjv_def}</div>` : ""),
+    content: lex.strongs_def,
+    note: "Exhaustive Concordance (1890) — widely used reference; numbered G" + strongs,
   });
   if (lex.deriv) sections.push({ label: "Etymology", content: lex.deriv });
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
+      {/* Inflected / quick gloss */}
       {quickDisplay && (
         <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl">
           <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">
-            {inflected ? "Inflected Gloss" : "Quick Definition"}
+            {inflected ? "Inflected Gloss" : "Core Meaning"}
           </p>
           <p className="text-sm text-text-primary leading-relaxed italic">&ldquo;{quickDisplay}&rdquo;</p>
           {inflected && quickClean && quickClean !== inflected && (
@@ -2255,13 +2676,43 @@ function DefinitionTab({ strongs, morph }: { strongs: number; morph: string }) {
           )}
         </div>
       )}
+
+      {/* KJV semantic range */}
+      {kjvGlosses.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-2">English Translations (KJV range)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {kjvGlosses.slice(0, 14).map((g, i) => (
+              <span key={i} className="text-[11px] px-2 py-0.5 bg-bg-elevated border border-border-subtle rounded-full text-text-primary">
+                {g}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-text-muted mt-2 leading-relaxed opacity-70">
+            The range of English words used for this Greek word shows its semantic breadth.
+          </p>
+        </div>
+      )}
+
+      {sections.length > 0 && <div className="border-t border-border-subtle/50" />}
+
+      {/* Lexicon sections */}
       {sections.map((s, i) => (
         <div key={i}>
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">{s.label}</p>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-0.5">{s.label}</p>
+          {s.note && <p className="text-[10px] text-text-muted opacity-60 mb-1.5 italic">{s.note}</p>}
           <div className="text-sm text-text-primary leading-relaxed" dangerouslySetInnerHTML={{ __html: s.content }} />
           {i < sections.length - 1 && <div className="mt-4 border-b border-border-subtle/50" />}
         </div>
       ))}
+
+      {/* Study note */}
+      <div className="p-3 bg-bg-elevated border border-border-subtle/50 rounded-xl">
+        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Study Note</p>
+        <p className="text-xs text-text-muted leading-relaxed">
+          Multiple lexicons give you a fuller picture — Abbott-Smith is great for scholarly depth, Moulton &amp; Milligan shows real-world usage, and Strong&apos;s (<span className="font-mono text-text-primary">G{strongs}</span>) is the standard cross-reference number used in most concordances and Bible software.
+        </p>
+      </div>
     </div>
   );
 }
@@ -2301,39 +2752,99 @@ function HebrewDefinitionTab({ strongs }: { strongs: number }) {
   if (!lex.lemma && !lex.brief && !lex.strongs_def) {
     return <p className="text-sm text-text-muted opacity-60">No definition found (H{strongs}).</p>;
   }
-  const quickClean = (lex.brief || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-  const sections: { label: string; content: string }[] = [];
-  if (lex.strongs_def) sections.push({
-    label: "Strong's",
-    content: lex.strongs_def + (lex.kjv_def ? `<div style="opacity:.65;margin-top:6px;font-size:.78rem;font-style:italic">KJV glosses: ${lex.kjv_def}</div>` : ""),
-  });
-  if (lex.deriv) sections.push({ label: "Etymology", content: lex.deriv });
+
+  const quickClean = (lex.brief || lex.quick_def || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+
+  // KJV glosses as individual translation chips — strip Strong's markup (X prefix, + signs)
+  const kjvGlosses = (lex.kjv_def || "")
+    .split(",")
+    .map(g => g.replace(/[()]/g, "").replace(/^[X+]\s*/, "").trim())
+    .filter(g => g.length > 1 && !/^\d+$/.test(g));
+
+  const strDef = (lex.strongs_def || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const extDef = (lex.extended || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const showExtended = extDef && extDef !== strDef;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
+      {/* Core meaning */}
       {quickClean && (
         <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl">
-          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">Quick Definition</p>
+          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">Core Meaning</p>
           <p className="text-sm text-text-primary leading-relaxed italic">&ldquo;{quickClean}&rdquo;</p>
         </div>
       )}
+
+      {/* Hebrew word + pronunciation */}
       {lex.lemma && (
         <div>
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1">Hebrew Lemma</p>
-          <p className="text-xl text-text-primary"
-            style={{ fontFamily: "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif", direction: "rtl" }}>
-            {lex.lemma}
-          </p>
-          {lex.translit && <p className="text-sm text-text-muted italic mt-1">{lex.translit}</p>}
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-2">Hebrew Word</p>
+          <div className="flex items-center gap-4 flex-wrap">
+            <p className="text-3xl text-text-primary leading-snug"
+              style={{ fontFamily: "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif", direction: "rtl" }}>
+              {lex.lemma}
+            </p>
+            {lex.pronounce && (
+              <div>
+                <p className="text-base text-text-primary font-medium tracking-wide">{lex.pronounce}</p>
+                <p className="text-[10px] text-text-muted mt-0.5">pronunciation</p>
+              </div>
+            )}
+          </div>
+          {lex.translit && <p className="text-sm text-text-muted italic mt-1.5">{lex.translit}</p>}
         </div>
       )}
-      {sections.map((s, i) => (
-        <div key={i}>
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">{s.label}</p>
-          <div className="text-sm text-text-primary leading-relaxed" dangerouslySetInnerHTML={{ __html: s.content }} />
-          {i < sections.length - 1 && <div className="mt-4 border-b border-border-subtle/50" />}
+
+      {/* KJV semantic range */}
+      {kjvGlosses.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-2">English Translations (KJV range)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {kjvGlosses.slice(0, 14).map((g, i) => (
+              <span key={i} className="text-[11px] px-2 py-0.5 bg-bg-elevated border border-border-subtle rounded-full text-text-primary">
+                {g}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-text-muted mt-2 leading-relaxed opacity-70">
+            One Hebrew word often carries several English meanings depending on context — this range shows the full breadth.
+          </p>
         </div>
-      ))}
+      )}
+
+      <div className="border-t border-border-subtle/50" />
+
+      {/* Strong's definition */}
+      {strDef && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Strong&apos;s Hebrew Dictionary</p>
+          <p className="text-sm text-text-primary leading-relaxed">{strDef}</p>
+        </div>
+      )}
+
+      {/* Extended (if differs from Strong's) */}
+      {showExtended && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Additional Notes</p>
+          <p className="text-sm text-text-primary leading-relaxed">{extDef}</p>
+        </div>
+      )}
+
+      {/* Etymology / root */}
+      {lex.deriv && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Root / Etymology</p>
+          <p className="text-sm text-text-primary leading-relaxed">{lex.deriv}</p>
+        </div>
+      )}
+
+      {/* Study guidance for beginners */}
+      <div className="p-3 bg-bg-elevated border border-border-subtle/50 rounded-xl">
+        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Study Note</p>
+        <p className="text-xs text-text-muted leading-relaxed">
+          Hebrew words carry richer meaning than any single English word can capture. Read the full range of translations above, consider the context of this passage, and let the root meaning inform your understanding. Strong&apos;s number <span className="font-mono text-text-primary">H{strongs}</span> lets you look this word up in other study tools like concordances or commentaries.
+        </p>
+      </div>
     </div>
   );
 }
