@@ -896,10 +896,10 @@ export default function RhemaPage() {
   const { user } = useAuthContext();
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [hebrewMode, setHebrewMode] = useState(false);
-  const [book, setBook] = useState("JOH");
-  const [chapter, setChapter] = useState("3");
-  const [verse, setVerse] = useState("16");
+  const [hebrewMode, setHebrewMode] = useState(true);
+  const [book, setBook] = useState("GEN");
+  const [chapter, setChapter] = useState("1");
+  const [verse, setVerse] = useState("1");
   const [textMode, setTextMode] = useState<TextMode>("majority");
   const [showEnglish, setShowEnglish] = useState(true);
   const [greekOnly, setGreekOnly] = useState(false);
@@ -1294,6 +1294,26 @@ export default function RhemaPage() {
         )}
 
         <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+          {/* Hebrew / LXX toggle — always visible for OT books */}
+          {isOTBook(book) && (
+            <button
+              onClick={() => { setHebrewMode(v => !v); setActiveWord(null); }}
+              title={hebrewMode ? "Switch to LXX (Greek OT)" : "Switch to Hebrew OT"}
+              className={cn(
+                "h-7 px-2.5 flex items-center gap-1.5 border transition-colors rounded-lg text-[11px] font-semibold",
+                hebrewMode
+                  ? "border-blue-500/60 bg-blue-500/15 text-blue-400"
+                  : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
+              )}
+            >
+              <span className="font-serif" style={{ fontFamily: "'Noto Serif Hebrew', serif" }}>א</span>
+              <span>{hebrewMode ? "Hebrew" : "LXX"}</span>
+              {isOTBook(book) && hebrewMode && !hebrewAvailable() && (
+                <span className="h-2 w-2 rounded-full border border-blue-400 border-t-transparent animate-spin ml-0.5" />
+              )}
+            </button>
+          )}
+
           {/* Copy verse */}
           <button onClick={copyVerse} title="Copy verse"
             className={cn("h-7 w-7 flex items-center justify-center border transition-colors rounded-lg",
@@ -2467,14 +2487,21 @@ function WandPopup({
   return (
     <div className="absolute right-0 top-full mt-1 w-60 bg-bg-surface border border-border-subtle shadow-2xl z-[39] py-1.5 rounded-xl overflow-hidden">
       {/* Hebrew / LXX toggle for OT books */}
-      {isOT && hebAvail && (
+      {isOT && (
         <>
-          <WandItem
-            active={hebrewMode}
-            label={hebrewMode ? "Hebrew OT" : "LXX (Greek OT)"}
-            desc={hebrewMode ? "Showing Hebrew Masoretic Text" : "Showing Septuagint Greek"}
-            onClick={onToggleHebrew}
-          />
+          {hebAvail ? (
+            <WandItem
+              active={hebrewMode}
+              label={hebrewMode ? "Hebrew OT" : "LXX (Greek OT)"}
+              desc={hebrewMode ? "Showing Hebrew Masoretic Text" : "Showing Septuagint Greek"}
+              onClick={onToggleHebrew}
+            />
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-2 opacity-50">
+              <span className="h-3 w-3 rounded-full border border-accent border-t-transparent animate-spin shrink-0" />
+              <span className="text-xs text-text-muted">Loading Hebrew data…</span>
+            </div>
+          )}
           <div className="my-1 border-t border-border-subtle/60" />
         </>
       )}
