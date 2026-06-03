@@ -54,7 +54,10 @@ interface LexEntry {
 interface HebrewLexEntry {
   lemma?: string;
   translit?: string;
+  pronounce?: string;
   brief?: string;
+  quick_def?: string;
+  extended?: string;
   strongs_def?: string;
   kjv_def?: string;
   deriv?: string;
@@ -1131,7 +1134,7 @@ export default function RhemaPage() {
 
   function jumpToHistoryStop(idx: number) {
     const stop = navHistory[idx];
-    setNavHistory(h => h.slice(0, idx));
+    // Don't truncate — all stops remain so the user can freely move between them
     setBook(stop.book); setChapter(stop.chapter); setVerse(stop.verse);
     setActiveWord(null);
   }
@@ -2232,22 +2235,42 @@ function DefinitionTab({ strongs, morph }: { strongs: number; morph: string }) {
   const quickClean = quickRaw.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
   const quickDisplay = inflected || quickClean;
 
-  const sections: { label: string; content: string }[] = [];
-  if (lex.abbott_smith) sections.push({ label: "Abbott-Smith", content: lex.abbott_smith });
-  if (lex.moulton_milligan) sections.push({ label: "Moulton-Milligan", content: lex.moulton_milligan });
-  if (lex.extended || lex.brief) sections.push({ label: "Dodson", content: (lex.extended || lex.brief)! });
+  // KJV semantic range chips
+  const kjvGlosses = (lex.kjv_def || "")
+    .split(",")
+    .map(g => g.replace(/[()]/g, "").replace(/^[X+]\s*/, "").trim())
+    .filter(g => g.length > 1 && !/^\d+$/.test(g));
+
+  const sections: { label: string; content: string; note?: string }[] = [];
+  if (lex.abbott_smith) sections.push({
+    label: "Abbott-Smith",
+    content: lex.abbott_smith,
+    note: "Manual Greek Lexicon of the NT (1922) — scholarly, concise definitions with LXX usage",
+  });
+  if (lex.moulton_milligan) sections.push({
+    label: "Moulton & Milligan",
+    content: lex.moulton_milligan,
+    note: "Vocabulary of the Greek NT (1930) — how this word was used in everyday papyri & documents",
+  });
+  if (lex.extended || lex.brief) sections.push({
+    label: "Dodson",
+    content: (lex.extended || lex.brief)!,
+    note: "Public domain Greek–English lexicon",
+  });
   if (lex.strongs_def) sections.push({
     label: "Strong's",
-    content: lex.strongs_def + (lex.kjv_def ? `<div style="opacity:.65;margin-top:6px;font-size:.78rem;font-style:italic">KJV glosses: ${lex.kjv_def}</div>` : ""),
+    content: lex.strongs_def,
+    note: "Exhaustive Concordance (1890) — widely used reference; numbered G" + strongs,
   });
   if (lex.deriv) sections.push({ label: "Etymology", content: lex.deriv });
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
+      {/* Inflected / quick gloss */}
       {quickDisplay && (
         <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl">
           <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">
-            {inflected ? "Inflected Gloss" : "Quick Definition"}
+            {inflected ? "Inflected Gloss" : "Core Meaning"}
           </p>
           <p className="text-sm text-text-primary leading-relaxed italic">&ldquo;{quickDisplay}&rdquo;</p>
           {inflected && quickClean && quickClean !== inflected && (
@@ -2255,13 +2278,43 @@ function DefinitionTab({ strongs, morph }: { strongs: number; morph: string }) {
           )}
         </div>
       )}
+
+      {/* KJV semantic range */}
+      {kjvGlosses.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-2">English Translations (KJV range)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {kjvGlosses.slice(0, 14).map((g, i) => (
+              <span key={i} className="text-[11px] px-2 py-0.5 bg-bg-elevated border border-border-subtle rounded-full text-text-primary">
+                {g}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-text-muted mt-2 leading-relaxed opacity-70">
+            The range of English words used for this Greek word shows its semantic breadth.
+          </p>
+        </div>
+      )}
+
+      {sections.length > 0 && <div className="border-t border-border-subtle/50" />}
+
+      {/* Lexicon sections */}
       {sections.map((s, i) => (
         <div key={i}>
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">{s.label}</p>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-0.5">{s.label}</p>
+          {s.note && <p className="text-[10px] text-text-muted opacity-60 mb-1.5 italic">{s.note}</p>}
           <div className="text-sm text-text-primary leading-relaxed" dangerouslySetInnerHTML={{ __html: s.content }} />
           {i < sections.length - 1 && <div className="mt-4 border-b border-border-subtle/50" />}
         </div>
       ))}
+
+      {/* Study note */}
+      <div className="p-3 bg-bg-elevated border border-border-subtle/50 rounded-xl">
+        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Study Note</p>
+        <p className="text-xs text-text-muted leading-relaxed">
+          Multiple lexicons give you a fuller picture — Abbott-Smith is great for scholarly depth, Moulton &amp; Milligan shows real-world usage, and Strong&apos;s (<span className="font-mono text-text-primary">G{strongs}</span>) is the standard cross-reference number used in most concordances and Bible software.
+        </p>
+      </div>
     </div>
   );
 }
@@ -2301,39 +2354,99 @@ function HebrewDefinitionTab({ strongs }: { strongs: number }) {
   if (!lex.lemma && !lex.brief && !lex.strongs_def) {
     return <p className="text-sm text-text-muted opacity-60">No definition found (H{strongs}).</p>;
   }
-  const quickClean = (lex.brief || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-  const sections: { label: string; content: string }[] = [];
-  if (lex.strongs_def) sections.push({
-    label: "Strong's",
-    content: lex.strongs_def + (lex.kjv_def ? `<div style="opacity:.65;margin-top:6px;font-size:.78rem;font-style:italic">KJV glosses: ${lex.kjv_def}</div>` : ""),
-  });
-  if (lex.deriv) sections.push({ label: "Etymology", content: lex.deriv });
+
+  const quickClean = (lex.brief || lex.quick_def || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+
+  // KJV glosses as individual translation chips — strip Strong's markup (X prefix, + signs)
+  const kjvGlosses = (lex.kjv_def || "")
+    .split(",")
+    .map(g => g.replace(/[()]/g, "").replace(/^[X+]\s*/, "").trim())
+    .filter(g => g.length > 1 && !/^\d+$/.test(g));
+
+  const strDef = (lex.strongs_def || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const extDef = (lex.extended || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const showExtended = extDef && extDef !== strDef;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
+      {/* Core meaning */}
       {quickClean && (
         <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl">
-          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">Quick Definition</p>
+          <p className="text-[10px] font-semibold text-accent uppercase tracking-widest mb-1">Core Meaning</p>
           <p className="text-sm text-text-primary leading-relaxed italic">&ldquo;{quickClean}&rdquo;</p>
         </div>
       )}
+
+      {/* Hebrew word + pronunciation */}
       {lex.lemma && (
         <div>
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1">Hebrew Lemma</p>
-          <p className="text-xl text-text-primary"
-            style={{ fontFamily: "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif", direction: "rtl" }}>
-            {lex.lemma}
-          </p>
-          {lex.translit && <p className="text-sm text-text-muted italic mt-1">{lex.translit}</p>}
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-2">Hebrew Word</p>
+          <div className="flex items-center gap-4 flex-wrap">
+            <p className="text-3xl text-text-primary leading-snug"
+              style={{ fontFamily: "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif", direction: "rtl" }}>
+              {lex.lemma}
+            </p>
+            {lex.pronounce && (
+              <div>
+                <p className="text-base text-text-primary font-medium tracking-wide">{lex.pronounce}</p>
+                <p className="text-[10px] text-text-muted mt-0.5">pronunciation</p>
+              </div>
+            )}
+          </div>
+          {lex.translit && <p className="text-sm text-text-muted italic mt-1.5">{lex.translit}</p>}
         </div>
       )}
-      {sections.map((s, i) => (
-        <div key={i}>
-          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">{s.label}</p>
-          <div className="text-sm text-text-primary leading-relaxed" dangerouslySetInnerHTML={{ __html: s.content }} />
-          {i < sections.length - 1 && <div className="mt-4 border-b border-border-subtle/50" />}
+
+      {/* KJV semantic range */}
+      {kjvGlosses.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-2">English Translations (KJV range)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {kjvGlosses.slice(0, 14).map((g, i) => (
+              <span key={i} className="text-[11px] px-2 py-0.5 bg-bg-elevated border border-border-subtle rounded-full text-text-primary">
+                {g}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-text-muted mt-2 leading-relaxed opacity-70">
+            One Hebrew word often carries several English meanings depending on context — this range shows the full breadth.
+          </p>
         </div>
-      ))}
+      )}
+
+      <div className="border-t border-border-subtle/50" />
+
+      {/* Strong's definition */}
+      {strDef && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Strong&apos;s Hebrew Dictionary</p>
+          <p className="text-sm text-text-primary leading-relaxed">{strDef}</p>
+        </div>
+      )}
+
+      {/* Extended (if differs from Strong's) */}
+      {showExtended && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Additional Notes</p>
+          <p className="text-sm text-text-primary leading-relaxed">{extDef}</p>
+        </div>
+      )}
+
+      {/* Etymology / root */}
+      {lex.deriv && (
+        <div>
+          <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Root / Etymology</p>
+          <p className="text-sm text-text-primary leading-relaxed">{lex.deriv}</p>
+        </div>
+      )}
+
+      {/* Study guidance for beginners */}
+      <div className="p-3 bg-bg-elevated border border-border-subtle/50 rounded-xl">
+        <p className="text-[10px] font-semibold text-text-muted uppercase tracking-widest mb-1.5">Study Note</p>
+        <p className="text-xs text-text-muted leading-relaxed">
+          Hebrew words carry richer meaning than any single English word can capture. Read the full range of translations above, consider the context of this passage, and let the root meaning inform your understanding. Strong&apos;s number <span className="font-mono text-text-primary">H{strongs}</span> lets you look this word up in other study tools like concordances or commentaries.
+        </p>
+      </div>
     </div>
   );
 }
