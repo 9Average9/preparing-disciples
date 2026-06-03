@@ -2182,9 +2182,9 @@ function PhraseBuilderView({
     const dy = e.clientY - d.startY;
     if (!d.activated && Math.sqrt(dx * dx + dy * dy) < 8) return;
     d.activated = true;
-    // Indent = cursor X position relative to container left edge
+    // Indent = cursor X position relative to container left edge (16px per step, up to 48 levels)
     const cLeft = containerRef.current?.getBoundingClientRect().left ?? 0;
-    const indent = Math.max(0, Math.min(12, Math.round((e.clientX - cLeft - 16) / 40)));
+    const indent = Math.max(0, Math.min(48, Math.round((e.clientX - cLeft - 8) / 16)));
     const ia = calcInsertAt(e.clientY, rIdx);
     insertAtRef.current = ia;
     setInsertAt(ia);
@@ -2234,41 +2234,34 @@ function PhraseBuilderView({
   const isEmpty = rows.every(r => r.words.length === 0);
 
   return (
-    <div ref={containerRef} className="max-w-3xl mx-auto relative">
+    <div ref={containerRef} className="w-full min-h-[calc(100vh-180px)] relative overflow-x-auto">
 
-      {/* ── Reference picker ── */}
-      <div className="mb-8 flex flex-col gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 shrink-0">
-            <Columns2 className="h-3 w-3 text-accent" />
-            <span className="text-xs font-semibold text-accent tracking-wide">{activeLabel}</span>
-            <span className="text-[10px] text-accent/60">Phrase Structure</span>
-          </div>
-          <div className="flex items-center gap-1.5 flex-1 min-w-[240px]">
-            <input
-              value={refInput}
-              onChange={e => { setRefInput(e.target.value); setRefError(""); }}
-              onKeyDown={e => e.key === "Enter" && loadRef()}
-              placeholder="e.g. Gen 5:8-13 or John 3:16-17"
-              className="flex-1 h-7 bg-bg-elevated border border-border-subtle px-2.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
-            />
-            <button onClick={loadRef} className="h-7 px-3 text-xs border border-border-subtle text-text-muted hover:border-accent hover:text-accent transition-colors rounded-lg shrink-0">Load</button>
-            <button
-              onClick={() => {
-                const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
-                setRefInput(label); setActiveLabel(label);
-                setRows(buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
-                setRefError("");
-              }}
-              className="h-7 px-2 text-xs border border-border-subtle text-text-muted hover:text-text-primary transition-colors rounded-lg shrink-0"
-              title="Reset to current verse"
-            >Reset</button>
-          </div>
+      {/* ── Reference picker — compact strip ── */}
+      <div className="mb-6 flex items-center gap-2 flex-wrap">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 shrink-0">
+          <Columns2 className="h-3 w-3 text-accent" />
+          <span className="text-xs font-semibold text-accent tracking-wide">{activeLabel}</span>
         </div>
-        {refError && <p className="text-xs text-red-400 pl-1">{refError}</p>}
-        <p className="text-[10px] text-text-muted opacity-40 pl-1">
-          Drag any word — it and everything after it moves. Drop position sets the indent. Drag left edge words to reposition whole rows.
-        </p>
+        <input
+          value={refInput}
+          onChange={e => { setRefInput(e.target.value); setRefError(""); }}
+          onKeyDown={e => e.key === "Enter" && loadRef()}
+          placeholder="Gen 5:8-13 or John 3:16-17"
+          className="h-7 w-52 bg-bg-elevated border border-border-subtle px-2.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent rounded-lg"
+        />
+        <button onClick={loadRef} className="h-7 px-3 text-xs border border-border-subtle text-text-muted hover:border-accent hover:text-accent transition-colors rounded-lg shrink-0">Load</button>
+        <button
+          onClick={() => {
+            const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
+            setRefInput(label); setActiveLabel(label);
+            setRows(buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
+            setRefError("");
+          }}
+          className="h-7 px-2 text-xs border border-border-subtle text-text-muted hover:text-text-primary transition-colors rounded-lg shrink-0"
+          title="Reset to current verse"
+        >Reset</button>
+        {refError && <span className="text-xs text-red-400">{refError}</span>}
+        <span className="text-[10px] text-text-muted opacity-30 ml-auto hidden sm:inline">drag any word → it + following words move freely</span>
       </div>
 
       {/* ── Ghost overlay — floats words under cursor while dragging ── */}
@@ -2279,7 +2272,7 @@ function PhraseBuilderView({
             className="fixed pointer-events-none z-50 drop-shadow-2xl"
             style={{ left: dragView.x - 20, top: dragView.y - 18, transform: "rotate(-0.4deg)" }}
           >
-            <div className="flex flex-wrap gap-x-[0.35em] text-xl font-serif text-text-primary/80 leading-relaxed">
+            <div className="flex flex-wrap gap-x-[0.35em] text-2xl font-serif text-text-primary/80 leading-relaxed">
               {ghostWords.map((w, i) => <span key={i}>{w}</span>)}
             </div>
           </div>
@@ -2290,14 +2283,14 @@ function PhraseBuilderView({
         <p className="text-sm text-text-muted opacity-60">No text found for this passage.</p>
       )}
 
-      {/* ── Phrase canvas ── */}
-      <div className="flex flex-col gap-0 select-none">
+      {/* ── Phrase canvas — full width, generous vertical space ── */}
+      <div className="flex flex-col gap-0 select-none" style={{ minWidth: "max-content" }}>
         {rows.map((row, rIdx) => (
           <div key={row.id}>
 
             {/* Drop indicator above row */}
             {insertAt === rIdx && dragView && dragView.rowIdx !== rIdx && (
-              <div className="relative h-px my-1 overflow-visible">
+              <div className="relative h-px my-1 overflow-visible" style={{ minWidth: "100vw" }}>
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-accent to-transparent" />
                 <div className="absolute inset-0 bg-accent/50 blur-sm" />
               </div>
@@ -2305,15 +2298,15 @@ function PhraseBuilderView({
 
             <div
               ref={el => { rowRefs.current[rIdx] = el; }}
-              className="flex flex-wrap items-baseline gap-x-[0.38em] gap-y-0.5 py-1 leading-relaxed transition-opacity duration-75"
+              className="flex flex-wrap items-baseline gap-x-[0.4em] gap-y-0 py-1.5 leading-loose transition-opacity duration-75"
               style={{
-                paddingLeft: `${row.indent * 40 + 8}px`,
-                opacity: dragView?.rowIdx === rIdx ? 0.12 : 1,
+                paddingLeft: `${row.indent * 16 + 8}px`,
+                opacity: dragView?.rowIdx === rIdx ? 0.1 : 1,
               }}
             >
               {/* Verse label */}
               {row.verseLabel && (
-                <span className="text-[9px] font-bold text-accent/50 mr-0.5 self-center select-none tabular-nums">
+                <span className="text-[9px] font-bold text-accent/40 w-4 text-right shrink-0 self-center select-none tabular-nums">
                   {row.verseLabel}
                 </span>
               )}
@@ -2321,7 +2314,7 @@ function PhraseBuilderView({
               {row.words.map((word, wIdx) => (
                 <span
                   key={wIdx}
-                  className="text-xl font-serif cursor-grab active:cursor-grabbing hover:text-accent/70 transition-colors duration-75 touch-none"
+                  className="cursor-phrase text-2xl font-serif hover:text-accent/70 transition-colors duration-75 touch-none"
                   onPointerDown={e => onWordPointerDown(e, rIdx, wIdx)}
                   onPointerMove={e => onWordPointerMove(e, rIdx, wIdx)}
                   onPointerUp={e => onWordPointerUp(e, rIdx, wIdx)}
