@@ -28,7 +28,7 @@ declare global {
     RhemaCrossRefLabels?: string[];
     RhemaSyntax?: Record<string, Record<string, Record<string, Array<[number, number, string]>>>>;
     /* Hebrew */
-    RhemaOTHebrew?: { books: string[]; names: Record<string,string>; text: Record<string,Record<string,Record<string,Array<[string,number,string]>>>> };
+    RhemaHebrewOT?: { books: string[]; names: Record<string,string>; text: Record<string,Record<string,Record<string,Array<[string,number,string]>>>> };
     RhemaHebrewLexicon?: Record<number, HebrewLexEntry>;
   }
 }
@@ -72,6 +72,7 @@ const DATA_FILES_CORE = [
   "rhema-lexicon.js", "rhema-mm.js", "rhema-msb.js",
   "rhema-bsb.js", "rhema-syntax.js", "rhema-crossrefs.js",
 ];
+const HEBREW_BASE = "https://raw.githubusercontent.com/9Average9/Greek-Vocab/main/";
 const DATA_FILES_HEBREW = ["rhema-ot-hebrew.js", "rhema-hebrew-lexicon.js"];
 
 const CROSS_REF_LABELS: Record<string, string> = {
@@ -127,8 +128,8 @@ function getText(mode: TextMode) {
 }
 
 function getWords(book: string, ch: string, v: string, mode: TextMode, hebrew = false): Word[] {
-  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
-    return window.RhemaOTHebrew.text[book]?.[ch]?.[v] || [];
+  if (hebrew && isOTBook(book) && window.RhemaHebrewOT) {
+    return window.RhemaHebrewOT.text[book]?.[ch]?.[v] || [];
   }
   return getText(mode)[book]?.[ch]?.[v] || [];
 }
@@ -143,9 +144,9 @@ function getEnglishLabel(mode: TextMode) {
 }
 
 function getBookOrder(mode: TextMode, hebrew = false): string[] {
-  if (hebrew && window.RhemaOTHebrew) {
+  if (hebrew && window.RhemaHebrewOT) {
     const ntText = getText(mode);
-    const otBooks = OT_BOOK_ORDER.filter(b => window.RhemaOTHebrew!.text[b]);
+    const otBooks = OT_BOOK_ORDER.filter(b => window.RhemaHebrewOT!.text[b]);
     const ntBooks = NT_BOOK_ORDER.filter(b => ntText[b]);
     return [...otBooks, ...ntBooks];
   }
@@ -154,8 +155,8 @@ function getBookOrder(mode: TextMode, hebrew = false): string[] {
 }
 
 function getChapters(book: string, mode: TextMode, hebrew = false): string[] {
-  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
-    const chObj = window.RhemaOTHebrew.text[book] || {};
+  if (hebrew && isOTBook(book) && window.RhemaHebrewOT) {
+    const chObj = window.RhemaHebrewOT.text[book] || {};
     return Object.keys(chObj).sort((a, b) => Number(a) - Number(b));
   }
   const chObj = getText(mode)[book] || {};
@@ -163,8 +164,8 @@ function getChapters(book: string, mode: TextMode, hebrew = false): string[] {
 }
 
 function getVerses(book: string, ch: string, mode: TextMode, hebrew = false): string[] {
-  if (hebrew && isOTBook(book) && window.RhemaOTHebrew) {
-    const vObj = window.RhemaOTHebrew.text[book]?.[ch] || {};
+  if (hebrew && isOTBook(book) && window.RhemaHebrewOT) {
+    const vObj = window.RhemaHebrewOT.text[book]?.[ch] || {};
     return Object.keys(vObj).sort((a, b) => Number(a) - Number(b));
   }
   const vObj = getText(mode)[book]?.[ch] || {};
@@ -184,7 +185,7 @@ function isOTBook(book: string): boolean {
 }
 
 function hebrewAvailable(): boolean {
-  return !!(window.RhemaOTHebrew && window.RhemaHebrewLexicon);
+  return !!(window.RhemaHebrewOT && window.RhemaHebrewLexicon);
 }
 
 function getQuickDef(lex: LexEntry): string {
@@ -304,12 +305,15 @@ function getHebrewWordGloss(lex: HebrewLexEntry, morph: string): string {
   const src = lex.brief || lex.kjv_def || lex.strongs_def || "";
   const base = src.replace(/<[^>]+>/g, "").split(/[,;]/)[0].trim().replace(/^to /, "").trim();
   if (!base || !morph) return base;
-  const pos = morph[0];
+  // Strip H prefix + compound prefix (e.g. "HVqp3ms" → "Vqp3ms", "HR/Ncfsa" → "Ncfsa")
+  let m = morph.startsWith("H") ? morph.slice(1) : morph;
+  if (m.includes("/")) m = m.split("/").pop()!;
+  const pos = m[0];
   if (pos === "V") {
-    const form = morph[2] || "";
-    const person = morph[3] || "";
-    const gender = morph[4] || "";
-    const number = morph[5] || "";
+    const form = m[2] || "";
+    const person = m[3] || "";
+    const gender = m[4] || "";
+    const number = m[5] || "";
     if (form === "c" || form === "a") return `to ${base}`;
     if (form === "r") return engIng(base);
     if (form === "s") return `${engIng(base)} (pass.)`;
@@ -327,8 +331,8 @@ function getHebrewWordGloss(lex: HebrewLexEntry, morph: string): string {
     return subj ? `${subj} ${base}` : base;
   }
   if (pos === "N") {
-    const number = morph[3] || "";
-    const state = morph[4] || "";
+    const number = m[3] || "";
+    const state = m[4] || "";
     const isPlural = number === "p" || number === "d";
     const firstWord = base.split(" ")[0];
     const rest = base.includes(" ") ? base.slice(base.indexOf(" ")) : "";
@@ -336,7 +340,7 @@ function getHebrewWordGloss(lex: HebrewLexEntry, morph: string): string {
     return state === "c" ? `of ${displayBase}` : displayBase;
   }
   if (pos === "A") {
-    const number = morph[3] || "";
+    const number = m[3] || "";
     const isPlural = number === "p";
     const firstWord = base.split(" ")[0];
     const rest = base.includes(" ") ? base.slice(base.indexOf(" ")) : "";
@@ -348,9 +352,9 @@ function getHebrewWordGloss(lex: HebrewLexEntry, morph: string): string {
 function getOccurrences(strongs: number, mode: TextMode, hebrew = false): { total: number; books: Record<string, number> } {
   const result: Record<string, number> = {};
   let total = 0;
-  if (hebrew && window.RhemaOTHebrew) {
-    for (const book of (window.RhemaOTHebrew.books || OT_BOOK_ORDER)) {
-      const bookText = window.RhemaOTHebrew.text[book] || {};
+  if (hebrew && window.RhemaHebrewOT) {
+    for (const book of (window.RhemaHebrewOT.books || OT_BOOK_ORDER)) {
+      const bookText = window.RhemaHebrewOT.text[book] || {};
       let count = 0;
       for (const ch of Object.keys(bookText)) {
         for (const v of Object.keys(bookText[ch])) {
@@ -995,11 +999,11 @@ export default function RhemaPage() {
       s.onerror = () => { if (!failed) { failed = true; setLoadError(true); } };
       document.head.appendChild(s);
     }
-    // Hebrew files load silently — app works without them
+    // Hebrew files load from GitHub — app works without them if unavailable
     let hebrewCount = 0;
     for (const file of DATA_FILES_HEBREW) {
       const s = document.createElement("script");
-      s.src = `${STORAGE_BASE}${encodeURIComponent(file)}?alt=media`;
+      s.src = `${HEBREW_BASE}${file}`;
       s.onload = () => {
         hebrewCount++;
         if (hebrewCount === DATA_FILES_HEBREW.length) forceUpdate(n => n + 1);
@@ -2353,8 +2357,8 @@ function BookOccurrences({ book, strongs, textMode, isHebrew, onNavigate }: {
   book: string; strongs: number; textMode: TextMode; isHebrew: boolean;
   onNavigate: (ch: string, v: string) => void;
 }) {
-  const bookText = isHebrew && window.RhemaOTHebrew
-    ? (window.RhemaOTHebrew.text[book] || {})
+  const bookText = isHebrew && window.RhemaHebrewOT
+    ? (window.RhemaHebrewOT.text[book] || {})
     : (getText(textMode)[book] || {});
   const scriptFont = isHebrew
     ? "'Noto Serif Hebrew','SBL Hebrew','David','Times New Roman',serif"

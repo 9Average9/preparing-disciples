@@ -239,66 +239,87 @@ const HEBREW_PARTICLE_TYPES: Record<string, string> = {
 
 export interface HebrewMorphRow { label: string; value: string; desc: string }
 
+/* Strip OSHB H-prefix and resolve compound morphs (e.g. "HR/Ncfsa" → main="Ncfsa", prefix="R") */
+function parseOSHBMorph(code: string): { main: string; prefixes: string[] } {
+  let c = code.startsWith('H') ? code.slice(1) : code;
+  const parts = c.split('/');
+  const main = parts.pop() || '';
+  const prefixes = parts;
+  return { main, prefixes };
+}
+
 export function decodeHebrewMorph(code: string): HebrewMorphRow[] {
   if (!code) return [];
   const rows: HebrewMorphRow[] = [];
-  const pos = code[0];
+  const { main, prefixes } = parseOSHBMorph(code);
+
+  // Show any attached prefixes first
+  for (const pf of prefixes) {
+    const pfPos = pf[0];
+    if (pfPos === 'R') rows.push({ label:'Prefix', value:'Preposition', desc:'inseparable preposition prefix' });
+    else if (pfPos === 'C') rows.push({ label:'Prefix', value:'Conjunction', desc:'waw-conjunction prefix' });
+    else if (pfPos === 'T') rows.push({ label:'Prefix', value:'Article', desc:'definite article prefix' });
+    else if (pfPos === 'S') rows.push({ label:'Prefix', value:'Pronominal Suffix', desc:'' });
+    else if (pf) rows.push({ label:'Prefix', value:pf, desc:'' });
+  }
+
+  const pos = main[0];
 
   if (pos === 'V') {
     rows.push({ label:'Part of Speech', value:'Verb', desc:'' });
-    const stem = code[1]; const form = code[2];
-    const person = code[3]; const gender = code[4]; const number = code[5];
+    const stem = main[1]; const form = main[2];
+    const person = main[3]; const gender = main[4]; const number = main[5];
     if (stem && HEBREW_VERB_STEMS[stem]) rows.push({ label:'Stem', value:HEBREW_VERB_STEMS[stem], desc:'' });
     if (form) { const f = HEBREW_VERB_FORMS[form]; if (f) rows.push({ label:'Form', value:f.l, desc:f.d }); }
     if (person && HEBREW_PERSON[person]) rows.push({ label:'Person', value:HEBREW_PERSON[person], desc:'' });
     if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
     if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
   } else if (pos === 'N') {
-    const type = code[1]; const gender = code[2]; const number = code[3]; const state = code[4];
+    const type = main[1]; const gender = main[2]; const number = main[3]; const state = main[4];
     rows.push({ label:'Part of Speech', value:HEBREW_NOUN_TYPES[type] || 'Noun', desc:'' });
     if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
     if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
     if (state) { const s = HEBREW_STATES[state]; if (s) rows.push({ label:'State', value:s.l, desc:s.d }); }
   } else if (pos === 'A') {
     rows.push({ label:'Part of Speech', value:'Adjective', desc:'' });
-    const gender = code[2]; const number = code[3]; const state = code[4];
+    const gender = main[2]; const number = main[3]; const state = main[4];
     if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
     if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
     if (state) { const s = HEBREW_STATES[state]; if (s) rows.push({ label:'State', value:s.l, desc:s.d }); }
   } else if (pos === 'P') {
-    const type = code[1]; const person = code[2]; const gender = code[3]; const number = code[4];
+    const type = main[1]; const person = main[2]; const gender = main[3]; const number = main[4];
     rows.push({ label:'Part of Speech', value:HEBREW_PRON_TYPES[type] || 'Pronoun', desc:'' });
     if (person && HEBREW_PERSON[person]) rows.push({ label:'Person', value:HEBREW_PERSON[person], desc:'' });
     if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
     if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
   } else if (pos === 'R') {
     rows.push({ label:'Part of Speech', value:'Preposition', desc:'' });
-    if (code[1] === 'd') rows.push({ label:'Note', value:'with Definite Article', desc:'' });
+    if (main[1] === 'd') rows.push({ label:'Note', value:'with Definite Article', desc:'' });
   } else if (pos === 'C') {
     rows.push({ label:'Part of Speech', value:'Conjunction', desc:'' });
   } else if (pos === 'D') {
     rows.push({ label:'Part of Speech', value:'Adverb', desc:'' });
   } else if (pos === 'T') {
-    const label = code[1] ? (HEBREW_PARTICLE_TYPES[code[1]] || 'Particle') : 'Particle';
+    const label = main[1] ? (HEBREW_PARTICLE_TYPES[main[1]] || 'Particle') : 'Particle';
     rows.push({ label:'Part of Speech', value:label, desc:'' });
   } else if (pos === 'S') {
     rows.push({ label:'Part of Speech', value:'Pronominal Suffix', desc:'' });
-    const person = code[2]; const gender = code[3]; const number = code[4];
+    const person = main[2]; const gender = main[3]; const number = main[4];
     if (person && HEBREW_PERSON[person]) rows.push({ label:'Person', value:HEBREW_PERSON[person], desc:'' });
     if (gender && HEBREW_GENDERS[gender]) rows.push({ label:'Gender', value:HEBREW_GENDERS[gender], desc:'' });
     if (number && HEBREW_NUMBERS[number]) rows.push({ label:'Number', value:HEBREW_NUMBERS[number], desc:'' });
   } else {
-    rows.push({ label:'Morphology', value:code, desc:'' });
+    rows.push({ label:'Morphology', value:main || code, desc:'' });
   }
   return rows;
 }
 
-/* Maps first letter of OSHB morph code → highlight category key */
+/* Maps OSHB morph code (with H prefix + optional compound) → highlight category key */
 export function normalizeHebrewPosKey(morphCode: string): string | null {
   if (!morphCode) return null;
-  const pos = morphCode[0];
-  // Map to match HEBREW_CATEGORY_CONFIG keys
-  if (pos === 'N') return morphCode[1] === 'p' ? 'Np' : 'N';
+  const { main } = parseOSHBMorph(morphCode);
+  const pos = main[0];
+  if (pos === 'N') return main[1] === 'p' ? 'Np' : 'N';
   if (pos === 'A') return 'A';
   if (pos === 'P') return 'P';
   if (pos === 'V') return 'V';
