@@ -65,7 +65,7 @@ interface HebrewLexEntry {
 
 type Word = [string, number, string]; // [surface, strongs, morph]
 type TextMode = "majority" | "critical";
-type ActiveTab = "parsing" | "definition" | "occurrences";
+type ActiveTab = "parsing" | "definition" | "occurrences" | "note";
 
 const STORAGE_BASE =
   "https://firebasestorage.googleapis.com/v0/b/disciple-preparer.firebasestorage.app/o/rhema%2F";
@@ -110,6 +110,130 @@ const HEBREW_CATEGORY_CONFIG: Record<string, { label: string; text: string; bg: 
   T:  { label: "Particles",    text: "text-yellow-400",  bg: "bg-yellow-500/15",  border: "border-yellow-500/50",  dot: "bg-yellow-400" },
   S:  { label: "Suffixes",     text: "text-amber-400",   bg: "bg-amber-500/15",   border: "border-amber-500/50",   dot: "bg-amber-400" },
 };
+
+/* ── Book study data ────────────────────────────────────────── */
+const BOOK_GENRE: Record<string, string> = {
+  GEN:"narrative", EXO:"law",      LEV:"law",      NUM:"narrative", DEU:"law",
+  JOS:"history",  JDG:"history",  RUT:"history",
+  "1SA":"history","2SA":"history","1KI":"history","2KI":"history",
+  "1CH":"history","2CH":"history",EZR:"history",  NEH:"history",  EST:"history",
+  JOB:"wisdom",   PSA:"poetry",   PRO:"wisdom",   ECC:"wisdom",   SNG:"poetry",
+  ISA:"prophecy", JER:"prophecy", LAM:"poetry",   EZK:"prophecy", DAN:"apocalyptic",
+  HOS:"prophecy", JOL:"prophecy", AMO:"prophecy", OBA:"prophecy", JON:"narrative",
+  MIC:"prophecy", NAM:"prophecy", HAB:"prophecy", ZEP:"prophecy", HAG:"prophecy",
+  ZEC:"prophecy", MAL:"prophecy",
+  MAT:"gospel",   MAR:"gospel",   LUK:"gospel",   JOH:"gospel",   ACT:"history",
+  ROM:"epistle",  "1CO":"epistle","2CO":"epistle", GAL:"epistle",  EPH:"epistle",
+  PHP:"epistle",  COL:"epistle",  "1TH":"epistle","2TH":"epistle",
+  "1TI":"epistle","2TI":"epistle",TIT:"epistle",  PHM:"epistle",
+  HEB:"epistle",  JAM:"epistle",
+  "1PE":"epistle","2PE":"epistle","1JO":"epistle","2JO":"epistle","3JO":"epistle",
+  JUD:"epistle",  REV:"apocalyptic",
+};
+
+const GENRE_COLOR: Record<string, string> = {
+  narrative:   "bg-amber-500/10   text-amber-400   border-amber-500/30",
+  law:         "bg-red-500/10     text-red-400     border-red-500/30",
+  history:     "bg-orange-500/10  text-orange-400  border-orange-500/30",
+  wisdom:      "bg-teal-500/10    text-teal-400    border-teal-500/30",
+  poetry:      "bg-purple-500/10  text-purple-400  border-purple-500/30",
+  prophecy:    "bg-blue-500/10    text-blue-400    border-blue-500/30",
+  apocalyptic: "bg-rose-500/10    text-rose-400    border-rose-500/30",
+  gospel:      "bg-green-500/10   text-green-400   border-green-500/30",
+  epistle:     "bg-indigo-500/10  text-indigo-400  border-indigo-500/30",
+};
+
+const GENRE_PROMPTS: Record<string, string[]> = {
+  narrative:   ["Who acts and who is acted upon?", "What does God do here?", "What is the conflict or tension?", "What is the setting, and does it matter?"],
+  law:         ["Who is addressed?", "What action is required or prohibited?", "What reason or consequence is given?", "Moral, ceremonial, or civil?"],
+  history:     ["What is the turning point?", "What caused this event?", "What does the author emphasize?", "What is the human failure or faithfulness?"],
+  wisdom:      ["What contrast is being drawn?", "What repeated word or image appears?", "Who benefits from following this?", "What assumption underlies this?"],
+  poetry:      ["What is the dominant emotion?", "What images are used?", "What type of parallelism is present?", "What does the speaker ask of God?"],
+  prophecy:    ["What is the historical situation?", "Is this promise, warning, or both?", "Who is the audience?", "Near and far fulfillment?"],
+  gospel:      ["What does Jesus say and do?", "Who is present and how do they respond?", "What OT passage does this echo?", "What does this reveal about who Jesus is?"],
+  epistle:     ["What indicatives (truths) are stated?", "What imperatives (commands) follow?", "What is the logical argument?", "Who is the specific audience?"],
+  apocalyptic: ["What symbols are used?", "What OT imagery appears?", "What contrast is being drawn?", "What is the main message of hope or warning?"],
+};
+
+const BOOK_CONTEXT: Record<string, string> = {
+  GEN: "Written during or shortly after Moses' time (~1446–1400 BC). Genesis addresses Israel's origins before Sinai and engages — while reframing — ancient Near Eastern creation and flood traditions. Patriarchal customs mirror 2nd-millennium BC texts from Nuzi and Mari.",
+  EXO: "Set in Egypt's New Kingdom period (~1450 or ~1290 BC, debated). The tabernacle instructions mirror ancient suzerainty treaty structures. The ten plagues systematically challenge Egyptian deities by name.",
+  LEV: "A priestly handbook given at Sinai. The sacrificial system is not primitive ritual — it is a theologically ordered statement about holiness, atonement, and covenant access. Parallels exist in surrounding cultures but with distinctive theological warrants.",
+  NUM: "Records approximately 38 years between Sinai and Canaan. Structured around two military censuses. The older generation's death in the wilderness (due to unbelief at Kadesh-Barnea) is the narrative's theological hinge.",
+  DEU: "Moses' final speeches on the plains of Moab (~1406 BC). Structured like a Hittite suzerainty treaty (preamble, history, stipulations, blessings/curses, succession). It restates and applies the law for the Canaan-entering generation.",
+  JOS: "Covers the conquest and settlement of Canaan under Joshua (~1406–1380 BC). Archaeological evidence at Jericho and Hazor correlates with some accounts. Covenant faithfulness is the consistent condition for military success.",
+  JDG: "Approximately 350 years of apostasy, oppression, repentance, and deliverance (~1380–1050 BC). Judges were regional military deliverers, not national rulers. The book progressively demonstrates societal collapse when everyone does 'what is right in his own eyes.'",
+  RUT: "A counter-narrative of faithfulness set during the period of the Judges. The kinsman-redeemer (go'el) institution is the cultural and legal centerpiece. Ruth the Moabite becomes an ancestor of David and Christ (Matt 1:5).",
+  "1SA": "Covers Israel's transition from judges to monarchy (~1050–970 BC). Samuel is simultaneously the last major judge and a pivotal prophet. Saul's failure demonstrates the danger of kingship on human terms; David's anointing introduces the messianic covenant line.",
+  "2SA": "Chronicles David's reign over all Israel (~1010–970 BC). The Davidic covenant (ch. 7) is foundational to biblical messianism. David's moral failure with Bathsheba and its family consequences occupy nearly half the book.",
+  "1KI": "Covers Solomon's reign and the divided monarchy (~970–852 BC). Solomon's wisdom, temple construction, and eventual apostasy through foreign marriages dominate the first half. The north-south division follows his death.",
+  "2KI": "Continues through Israel's fall to Assyria (722 BC) and Judah's fall to Babylon (586 BC). Both deportations are explicitly interpreted as covenant judgment for persistent idolatry.",
+  "1CH": "A genealogical-priestly history compiled during or after the exile, emphasizing David's preparation for the temple, priestly organization, and proper worship. Military failures visible in Samuel-Kings are sometimes omitted to highlight faithfulness.",
+  "2CH": "Covers Solomon through Jerusalem's fall, centering on temple worship and righteous-king narratives. The northern kingdom receives minimal attention. Ends with Cyrus's return decree, directly connecting to Ezra.",
+  EZR: "Records two returns from Babylon under Zerubbabel (~538 BC) and Ezra (~458 BC). Ezra was a skilled scribe in the Mosaic law. The book addresses temple rebuilding and the community's struggle with assimilation through intermarriage. Written in both Hebrew and Aramaic.",
+  NEH: "Nehemiah was a Persian royal cupbearer — a position of high trust — who served as governor of Judah (~445 BC). Combines prayer, practical organization, and confrontation of external opponents to rebuild Jerusalem's walls.",
+  EST: "Set in the Persian court of Xerxes I (~480 BC). God's name never appears, yet his providential care is evident throughout. The Feast of Purim celebrates Jewish survival in diaspora. The book addresses identity and faithfulness under imperial pressure.",
+  JOB: "The setting is pre-Mosaic or non-Israelite (Job is from Uz, likely Edomite territory). The most sustained biblical engagement with innocent suffering. The prose framework and poetic dialogues likely represent intentionally combined literary traditions.",
+  PSA: "150 poems spanning ~1000 years (Moses to post-exile). Five books mirror the Pentateuch. Major genres include lament (the largest), praise, royal, wisdom, and torah psalms. Lament psalms model honest prayer that moves from complaint to trust.",
+  PRO: "Wisdom literature from Solomon's court (~950 BC) with later additions. Proverbs are generalizations — tendencies about how the world works — not universal guarantees. 'Fear of the LORD' is the foundational epistemology (1:7). The personification of Wisdom in chapters 1–9 has messianic resonances.",
+  ECC: "A wisdom investigation into meaning 'under the sun' (apart from God's perspective), associated with Solomon. The persistent 'vanity' (hebel = vapor) reaches resolution in the epilogue: fear God and keep his commandments. The book tests human wisdom to its limits.",
+  SNG: "Love poetry connected to Solomon's court. Celebrates human sexuality within covenant marriage. The book's canonical status was debated in Jewish tradition; Rabbi Akiba famously defended it. Some interpreters also see allegorical resonance with God's covenant love.",
+  ISA: "Isaiah of Jerusalem prophesied ~740–680 BC. Chapters 1–39 focus on judgment and near-term hope; chapters 40–66 emphasize comfort and restoration. The Servant Songs (42, 49, 50, 52–53) are pivotal for messianic interpretation. The NT quotes Isaiah more than any other OT prophet.",
+  JER: "Jeremiah prophesied in Judah from Josiah's reign through Jerusalem's fall (~627–580 BC). He was forbidden to marry as a sign of coming devastation. The New Covenant promise (ch. 31) is the longest messianic passage in the OT. The book is chronologically disordered by design.",
+  LAM: "Five acrostic poems (each following the Hebrew alphabet) lamenting Jerusalem's destruction (586 BC), traditionally attributed to Jeremiah. The book gives language to communal trauma and models unresolved grief before God, without forcing premature resolution.",
+  EZK: "Ezekiel prophesied from Babylon during the exile (~593–571 BC). His priestly background shapes the book's concern with purity, the sanctuary, and God's holiness. The 'glory of the LORD' departing from Jerusalem and later returning is the book's central theological arc.",
+  DAN: "Daniel served in Babylonian and Persian courts (~605–530 BC). Chapters 1–6 are court narratives; chapters 7–12 are apocalyptic visions. The 'son of man' vision (ch. 7) is foundational to Jesus' self-designation. The symbolic imagery assures the faithful of God's ultimate sovereignty over all empires.",
+  HOS: "Hosea prophesied to northern Israel ~760–720 BC, just before Assyrian conquest. His marriage to the unfaithful Gomer is a living parable of God's covenant with idolatrous Israel. The themes of covenant faithfulness (hesed) and spiritual adultery are central.",
+  JOL: "Joel's date is debated (pre-exilic to post-exilic). A devastating locust plague becomes both a call to repentance and a lens for describing the coming 'Day of the LORD.' The Spirit-pouring promise (2:28–29) is cited by Peter at Pentecost (Acts 2).",
+  AMO: "Amos prophesied to prosperous northern Israel ~760 BC (under Jeroboam II). He was a shepherd and sycamore farmer from Tekoa in Judah — an outsider. He relentlessly denounces injustice, corrupt worship, and false security built on economic prosperity.",
+  OBA: "The shortest OT book, a single chapter of judgment against Edom for rejoicing over Jerusalem's fall. Edom (descendants of Esau) represents recurring opposition to God's people. Likely post-587 BC.",
+  JON: "A narrative about a reluctant prophet, not a collection of oracles. The fish episode is only three verses; the theological center is God's concern for Nineveh (Israel's hated enemy) and Jonah's resistance to that mercy. Jesus cited it as a sign of his death and resurrection (Matt 12:40).",
+  MIC: "A contemporary of Isaiah and Hosea (~735–700 BC), Micah was a rural prophet who challenged urban corruption and false prophecy. The Bethlehem-ruler promise (5:2) is cited at Jesus' birth (Matt 2:6).",
+  NAM: "A declaration of Nineveh's fall ~100 years after Jonah's preaching there (~650 BC). Unlike Jonah, there is no call to repentance — Assyria's brutality has reached a point of judgment. Nahum demonstrates God's power to judge the world's cruelest empire.",
+  HAB: "A prophetic dialogue (~605 BC) where Habakkuk questions God about injustice and receives an unexpected answer: Babylon will be God's instrument. The statement 'the righteous shall live by his faith' (2:4) is cited in Romans 1:17, Galatians 3:11, and Hebrews 10:38.",
+  ZEP: "Prophesied under Josiah (~630–620 BC), just before his great revival. A descendant of Hezekiah, Zephaniah proclaims universal and national judgment ('the Day of the LORD') followed by the promised restoration of a humble remnant.",
+  HAG: "Two months of prophecy in 520 BC, after the return from Babylon. Haggai rebukes the returned exiles for building their own houses while the temple lay unfinished. Temple work resumes within three weeks. He is among the most immediately effective prophets in Scripture.",
+  ZEC: "Prophesied alongside Haggai (~520–480 BC). Chapters 1–8 feature eight night visions encouraging the restored community; chapters 9–14 shift to prophetic oracles with strong messianic content. The NT quotes Zechariah more than any OT book except Isaiah and Psalms.",
+  MAL: "The last OT prophet (~430–400 BC), addressing a post-exilic community grown disillusioned and careless. The disputational style ('You say…' / 'But I say…') confronts defiled offerings, divorce, and withheld tithes. The book closes pointing to the coming of Elijah — fulfilled in John the Baptist.",
+  MAT: "Written primarily for a Jewish audience, presenting Jesus as the fulfillment of OT Scripture and the Davidic Messiah. Matthew quotes or alludes to the OT ~130 times. Structured around five major discourses paralleling the Pentateuch. Written ~50–70 AD.",
+  MAR: "The shortest and likely earliest Gospel (~45–68 AD), traditionally connected to Peter. Emphasizes action ('immediately' appears ~41 times). Written for a Gentile (likely Roman) audience — Jewish customs are explained. Jesus' identity is revealed progressively, reaching full confession at the cross.",
+  LUK: "Written by Luke (a Gentile physician, Paul's companion) as part one of Luke–Acts. Emphasizes Jesus' concern for the marginalized: women, Samaritans, sinners, the poor. Has the most extensive birth narrative of any Gospel. Written ~60–80 AD, using Mark and additional sources.",
+  JOH: "The most theologically distinct Gospel, written ~85–100 AD. Organized around seven signs and seven 'I Am' statements. John explicitly states his purpose: 'these are written that you may believe that Jesus is the Christ, the Son of God, and that by believing you may have life in his name' (20:31). Faith alone is the instrument of eternal life.",
+  ACT: "Volume 2 of Luke's work, covering the spread of the church from Jerusalem to Rome (~30–62 AD). Structured around geographical and ethnic expansion: Jerusalem → Judea/Samaria → the ends of the earth. Records Paul's three missionary journeys and the gospel's movement from synagogue to empire.",
+  ROM: "Paul's most systematic theological letter, written ~57 AD before his planned visit to Rome. The argument moves from universal condemnation (1–3) to justification by faith (3–5) to sanctification (6–8) to Israel's future (9–11) to community life (12–16). The thesis: God's righteousness is revealed through faith (1:16–17).",
+  "1CO": "Written ~55 AD to a diverse, divided church in prosperous Corinth. Addresses factionalism, sexual ethics, idol food, spiritual gifts, the Lord's Supper, and the resurrection. Corinth's reputation for philosophical debate and moral laxity provides the backdrop for nearly every issue Paul addresses.",
+  "2CO": "Paul's most personal letter, written ~56 AD partly defending his apostolic authority against 'super-apostles.' The theology of suffering, weakness, and God's sufficient grace is central. Paul's collection for Jerusalem and the question of false teachers drive much of the argument.",
+  GAL: "Written ~48 AD (among the earliest NT letters) to churches being pressured to add circumcision and Torah to faith for justification. Paul's response is sharp: this is 'a different gospel — which is not a gospel at all.' Justification is by faith alone, apart from works of the law.",
+  EPH: "Written from prison (~60–62 AD), likely circulated as a general letter. Chapters 1–3 are doctrinal (grace, the mystery of Gentile inclusion, unity in Christ); chapters 4–6 are practical (community ethics, household codes, spiritual warfare). The cosmic scope of Christ's lordship is the foundation.",
+  PHP: "A letter of joy from prison (~60–62 AD) to Paul's first European church plant (Philippi, Acts 16). The 'kenosis hymn' (2:5–11) is one of the most important Christological passages in the NT. Addresses anxiety, contentment, false teachers, and the pursuit of knowing Christ.",
+  COL: "Written from prison (~60–62 AD) to address an early false teaching combining Jewish regulations with cosmic philosophy. The supremacy of Christ over all powers and principalities is the theological corrective. The most compact household code in Paul (3:18–4:1).",
+  "1TH": "Paul's earliest surviving letter (~50–51 AD), written to a new church that faced persecution. Affirms their faith, defends Paul's conduct, addresses sexual purity, and answers questions about believers who have died before Christ's return (4:13–5:11).",
+  "2TH": "Written shortly after 1 Thessalonians to address confusion: the 'Day of the Lord' has not already come. Paul describes events that must precede it ('the man of lawlessness'). Also confronts idleness in the community.",
+  "1TI": "A pastoral letter to Timothy in Ephesus (~63–65 AD). Addresses false teaching, prayer, qualifications for church leaders, care for widows and elders, and Timothy's personal godliness. The 'faithful sayings' (1:15; 3:1; 4:9) mark key theological affirmations.",
+  "2TI": "Paul's final letter from Roman imprisonment (~66–67 AD) before his execution. A charge to Timothy to remain faithful, preach the word, and guard the gospel amid opposition. The inspiration of Scripture (3:16–17) and the transmission of sound teaching (2:2) are foundational passages.",
+  TIT: "A pastoral letter to Titus in Crete (~63–65 AD). Addresses elder qualifications, behavior of different groups in the church, and the relationship between grace and good works. The Cretan cultural context shapes some of the instruction's directness.",
+  PHM: "The shortest of Paul's letters (~55–60 AD), a personal appeal regarding Onesimus — a runaway slave who became a believer. Paul uses legal obligation and family language to request Onesimus's freedom. A case study in the social implications of the gospel without direct command.",
+  HEB: "Author unknown (proposals include Apollos, Barnabas, Priscilla), written before 70 AD to Jewish believers tempted to return to Judaism. Central argument: Jesus is superior to angels, Moses, the Levitical priesthood, and the old covenant. Five solemn warning passages call readers to persevere in faith.",
+  JAM: "Written by James (the Lord's brother) ~49 AD, one of the earliest NT letters, to Jewish believers in diaspora. Practical wisdom literature addressing the relationship between faith and works — not for justification before God, but as evidence of genuine faith in community. James and Paul use 'justify' in different senses.",
+  "1PE": "Written ~64–65 AD to believers across Asia Minor facing Nero-era pressure. Addresses how to live as 'elect exiles' — those whose true citizenship is elsewhere. Suffering is reframed as participation in Christ's experience. Household codes address behavior under social vulnerability.",
+  "2PE": "Written shortly before Peter's death (~66–68 AD). Addresses false teachers who distort Paul's writings and deny Christ's return. The authority of apostolic eyewitness vs. 'cleverly devised myths' is a central concern. Chapter 3 on the Day of the Lord and new creation is eschatologically significant.",
+  "1JO": "Written by the Apostle John (~90–95 AD) to counter Docetic Gnosticism (which denied Christ's physical incarnation). The letter's tests of fellowship with God — walking in light, loving one another, confessing the Incarnation — are tests of community health, not the basis of assurance of eternal salvation.",
+  "2JO": "A brief letter from John to 'the elect lady and her children' (likely a local church). Warns against welcoming teachers who deny the Incarnation. The command to love and the warning about deception frame a pointed practical letter.",
+  "3JO": "A brief personal letter commending Gaius for supporting traveling missionaries and rebuking Diotrephes for self-promotion. A window into early church polity conflicts and the importance of hospitality to itinerant teachers.",
+  JUD: "A short letter from Jude (the Lord's brother) to combat false teachers who turned grace into a license for immorality. Uses OT examples (Sodom, Cain, Balaam, Korah) to describe the danger. The doxology (vv. 24–25) is among the most praised in the NT.",
+  REV: "Apocalyptic visions received by John on Patmos during Domitian's reign (~95 AD). Written to seven real historical churches under imperial pressure. Uses symbolic imagery drawn from Daniel, Ezekiel, Isaiah, and Zechariah. The main message: Christ is victorious, his people will endure, and God will judge the nations.",
+};
+
+const STUDY_THEMES = [
+  "Faith", "Salvation", "Justification", "Sanctification", "Eternal Life",
+  "Grace", "Atonement", "Sacrifice", "Forgiveness", "Repentance",
+  "Covenant", "Law", "Promise", "Fulfillment", "Prophecy",
+  "Kingdom", "Messiah", "Resurrection", "Holy Spirit", "Trinity",
+  "Prayer", "Worship", "Obedience", "Discipleship", "Rewards",
+  "Suffering", "Judgment", "Wrath", "Mercy", "Righteousness",
+  "Creation", "Providence", "Israel", "Church", "Mission",
+  "Love", "Hope", "Peace", "Wisdom", "Word of God",
+];
 
 /* ── Data helpers ───────────────────────────────────────────── */
 function getBibleData() {
@@ -1620,7 +1744,7 @@ export default function RhemaPage() {
         )}
         {showNotes && (
           <StudyWorkspacePanel
-            book={book} chapter={chapter} verse={verse}
+            book={book} chapter={chapter} verse={verse} textMode={textMode}
             activeTab={studyTab} onTabChange={setStudyTab}
             observations={observations} setObservations={setObservations}
             interpretations={interpretations} setInterpretations={setInterpretations}
@@ -2542,6 +2666,36 @@ function WordDetail({
     ? "'Noto Serif Hebrew', 'SBL Hebrew', 'David', 'Times New Roman', serif"
     : "Georgia, 'Times New Roman', serif";
 
+  const { user } = useAuthContext();
+  const [wordNote, setWordNote] = useState("");
+  const [wordNoteSaving, setWordNoteSaving] = useState(false);
+  const [wordNoteSaved, setWordNoteSaved] = useState(false);
+
+  useEffect(() => {
+    if (!user || !strongs) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ref = doc(db, "rhema_word_notes", user.uid, "words", String(strongs));
+        const snap = await getDoc(ref);
+        if (!cancelled) setWordNote(snap.exists() ? (snap.data().note || "") : "");
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [user, strongs]);
+
+  async function saveWordNote() {
+    if (!user || !strongs) return;
+    setWordNoteSaving(true);
+    try {
+      const ref = doc(db, "rhema_word_notes", user.uid, "words", String(strongs));
+      await setDoc(ref, { note: wordNote, lemma: lex.lemma, updatedAt: new Date() });
+      setWordNoteSaved(true);
+      setTimeout(() => setWordNoteSaved(false), 2000);
+    } catch { /* ignore */ }
+    setWordNoteSaving(false);
+  }
+
   return (
     <div className="w-[340px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden animate-slideInRight">
       {/* Header */}
@@ -2575,11 +2729,11 @@ function WordDetail({
 
       {/* Tabs */}
       <div className="flex border-b border-border-subtle">
-        {(["parsing","definition","occurrences"] as ActiveTab[]).map(tab => (
+        {(["parsing","definition","occurrences","note"] as ActiveTab[]).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
-            className={cn("flex-1 py-2 text-xs font-medium transition-colors border-b-2",
+            className={cn("flex-1 py-2 text-[10px] font-medium transition-colors border-b-2",
               activeTab === tab ? "text-text-primary border-accent" : "text-text-muted border-transparent hover:text-text-primary")}>
-            {tab === "occurrences" ? "Occurrences" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === "occurrences" ? "Uses" : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -2599,6 +2753,27 @@ function WordDetail({
         )}
         {activeTab === "occurrences" && (
           <OccurrencesTab strongs={strongs} textMode={textMode} isHebrew={isHebrew} onNavigate={onNavigateOccurrence} />
+        )}
+        {activeTab === "note" && (
+          <div className="flex flex-col gap-3 h-full">
+            <p className="text-[10px] text-text-muted uppercase tracking-widest">
+              Word study note — follows this word ({strongs_label}) everywhere it appears
+            </p>
+            <textarea
+              value={wordNote}
+              onChange={e => setWordNote(e.target.value)}
+              placeholder={`Notes on ${lex.lemma || surface}…`}
+              className="flex-1 w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
+              style={{ minHeight: "180px" }}
+            />
+            <button onClick={saveWordNote} disabled={wordNoteSaving}
+              className={cn("w-full h-9 flex items-center justify-center gap-2 text-xs font-medium border transition-colors disabled:opacity-60 rounded-lg",
+                wordNoteSaved ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
+              {wordNoteSaved ? <><Check className="h-3.5 w-3.5" /> Saved</>
+                : wordNoteSaving ? <><div className="h-3.5 w-3.5 border border-current border-t-transparent rounded-full animate-spin" /> Saving…</>
+                : <><Save className="h-3.5 w-3.5" /> Save Word Note</>}
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -3554,7 +3729,7 @@ const WS_META: Record<WorkspaceTab, { label: string; placeholder: string }> = {
 };
 
 function StudyWorkspacePanel({
-  book, chapter, verse,
+  book, chapter, verse, textMode,
   activeTab, onTabChange,
   observations, setObservations,
   interpretations, setInterpretations,
@@ -3562,7 +3737,7 @@ function StudyWorkspacePanel({
   questions, setQuestions,
   noteSaving, noteSaved, onSave, onClose,
 }: {
-  book: string; chapter: string; verse: string;
+  book: string; chapter: string; verse: string; textMode: TextMode;
   activeTab: WorkspaceTab; onTabChange: (t: WorkspaceTab) => void;
   observations: string; setObservations: (v: string) => void;
   interpretations: string; setInterpretations: (v: string) => void;
@@ -3571,6 +3746,63 @@ function StudyWorkspacePanel({
   noteSaving: boolean; noteSaved: boolean;
   onSave: () => void; onClose: () => void;
 }) {
+  const { user } = useAuthContext();
+  const [verseThemes, setVerseThemes] = useState<Set<string>>(new Set());
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+
+  /* Load themes when verse changes */
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ref = doc(db, "rhema_themes", user.uid, "passages", `${book}_${chapter}_${verse}`);
+        const snap = await getDoc(ref);
+        if (!cancelled) setVerseThemes(snap.exists() ? new Set(snap.data().themes || []) : new Set());
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [user, book, chapter, verse]);
+
+  async function toggleTheme(theme: string) {
+    if (!user) return;
+    const next = new Set(verseThemes);
+    if (next.has(theme)) next.delete(theme); else next.add(theme);
+    setVerseThemes(next);
+    try {
+      const ref = doc(db, "rhema_themes", user.uid, "passages", `${book}_${chapter}_${verse}`);
+      await setDoc(ref, { themes: [...next], updatedAt: new Date() });
+    } catch { /* ignore */ }
+  }
+
+  async function generateObservations() {
+    setAiGenerating(true);
+    try {
+      const englishText = getEnglishText(book, chapter, verse, textMode);
+      const res = await fetch("/api/rhema/observe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ref: `${BOOK_NAMES[book] || book} ${chapter}:${verse}`,
+          genre: BOOK_GENRE[book] || "narrative",
+          englishText,
+        }),
+      });
+      const data = await res.json();
+      if (data.text) {
+        setObservations(observations ? `${observations}\n\n─── AI Observations ───\n${data.text}` : data.text);
+        onTabChange("observations");
+      }
+    } catch { /* ignore */ }
+    setAiGenerating(false);
+  }
+
+  const genre = BOOK_GENRE[book] || "narrative";
+  const genreColor = GENRE_COLOR[genre] || "";
+  const context = BOOK_CONTEXT[book];
+  const genrePrompts = GENRE_PROMPTS[genre] || [];
+
   const value = activeTab === "observations" ? observations
     : activeTab === "interpretations" ? interpretations
     : activeTab === "applications" ? applications
@@ -3582,8 +3814,33 @@ function StudyWorkspacePanel({
   const meta = WS_META[activeTab];
 
   return (
-    <div className="w-[320px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
-      <PanelHeader title="Study Workspace" subtitle={`${BOOK_NAMES[book] || book} ${chapter}:${verse}`} onClose={onClose} />
+    <div className="w-[360px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-border-subtle flex items-center gap-2 shrink-0">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-text-primary">Study Workspace</p>
+          <p className="text-xs text-text-muted mt-0.5 truncate">{BOOK_NAMES[book] || book} {chapter}:{verse}</p>
+        </div>
+        <span className={cn("text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border shrink-0", genreColor)}>
+          {genre}
+        </span>
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary shrink-0"><X className="h-4 w-4" /></button>
+      </div>
+
+      {/* Book context (collapsible) */}
+      {context && (
+        <div className="px-4 py-2 border-b border-border-subtle/50 bg-bg-elevated/30 shrink-0">
+          <button onClick={() => setContextOpen(v => !v)}
+            className="flex items-center gap-1.5 w-full text-left group">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted group-hover:text-text-primary transition-colors">Historical Context</span>
+            <ChevronDown className={cn("h-3 w-3 text-text-muted ml-auto transition-transform", contextOpen && "rotate-180")} />
+          </button>
+          {contextOpen && (
+            <p className="text-xs text-text-muted leading-relaxed mt-2">{context}</p>
+          )}
+        </div>
+      )}
+
       {/* Tab bar */}
       <div className="flex border-b border-border-subtle shrink-0">
         {(Object.entries(WS_META) as [WorkspaceTab, typeof WS_META[WorkspaceTab]][]).map(([tab, m]) => (
@@ -3596,16 +3853,66 @@ function StudyWorkspacePanel({
           </button>
         ))}
       </div>
-      {/* Text area */}
-      <div className="flex-1 overflow-hidden p-4 flex flex-col">
+
+      {/* Toolbar: AI generate (Observe tab only) */}
+      {activeTab === "observations" && (
+        <div className="px-4 pt-3 pb-0 flex items-center justify-between shrink-0">
+          <span className="text-[10px] text-text-muted font-semibold uppercase tracking-widest">Observations</span>
+          <button
+            onClick={generateObservations}
+            disabled={aiGenerating}
+            className="flex items-center gap-1 text-[10px] px-2.5 py-1 border border-accent/40 text-accent hover:bg-accent/10 transition-colors rounded-full disabled:opacity-50"
+          >
+            {aiGenerating
+              ? <><div className="h-2.5 w-2.5 border border-current border-t-transparent rounded-full animate-spin" /> Generating…</>
+              : <><Wand2 className="h-2.5 w-2.5" /> Generate</>}
+          </button>
+        </div>
+      )}
+
+      {/* Textarea */}
+      <div className="flex-1 overflow-hidden px-4 pt-2 pb-2 flex flex-col gap-2 min-h-0">
         <textarea
           value={value}
           onChange={e => setValue(e.target.value)}
           placeholder={meta.placeholder}
-          className="flex-1 w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
+          className="flex-1 w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed min-h-0"
         />
+
+        {/* Genre starter prompts — shown when Observe is empty */}
+        {activeTab === "observations" && !observations && genrePrompts.length > 0 && (
+          <div className="shrink-0">
+            <p className="text-[9px] text-text-muted uppercase tracking-widest mb-1.5">Starter questions</p>
+            <div className="flex flex-wrap gap-1">
+              {genrePrompts.map((p, i) => (
+                <button key={i} onClick={() => setObservations(p + " ")}
+                  className="text-[10px] px-2 py-0.5 bg-bg-elevated border border-border-subtle rounded-full text-text-muted hover:border-accent hover:text-accent transition-colors">
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-      <div className="p-4 border-t border-border-subtle shrink-0">
+
+      {/* Theme tagger */}
+      <div className="px-4 py-3 border-t border-border-subtle/50 shrink-0">
+        <p className="text-[9px] text-text-muted font-semibold uppercase tracking-widest mb-2">Tag Themes</p>
+        <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+          {STUDY_THEMES.map(theme => (
+            <button key={theme} onClick={() => toggleTheme(theme)}
+              className={cn("text-[10px] px-2 py-0.5 rounded-full border transition-colors",
+                verseThemes.has(theme)
+                  ? "bg-accent/15 border-accent/50 text-accent font-semibold"
+                  : "border-border-subtle text-text-muted hover:border-accent/40 hover:text-text-primary")}>
+              {theme}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Save */}
+      <div className="px-4 pb-4 shrink-0">
         <button onClick={onSave} disabled={noteSaving}
           className={cn("w-full h-9 flex items-center justify-center gap-2 text-xs font-medium border transition-colors disabled:opacity-60 rounded-lg",
             noteSaved ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
