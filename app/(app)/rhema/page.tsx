@@ -3933,7 +3933,7 @@ function StudyWorkspacePanel({
           value={value}
           onChange={e => setValue(e.target.value)}
           placeholder={meta.placeholder}
-          className="w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
+          className="w-full shrink-0 bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
           rows={6}
         />
 
