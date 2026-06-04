@@ -2323,6 +2323,7 @@ function PhraseBuilderView({
           if (!selectedIds.has(r.id)) return r;
           return { ...r, x: Math.max(0, r.x + dx), y: Math.max(0, r.y + dy) };
         }));
+        setSelectedIds(new Set());
       }
       return;
     }
