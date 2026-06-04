@@ -2494,9 +2494,6 @@ function WordChip({
           : "border-transparent hover:border-border-subtle hover:bg-bg-elevated"
       )}
     >
-      {isVariant && (
-        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-orange-400/90 ring-1 ring-bg-base" title="Text variant" />
-      )}
       <span
         className={cn(
           FS_CONFIG[fontSize].chip, "leading-tight select-none",
