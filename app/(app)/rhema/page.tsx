@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, Columns2 } from "lucide-react";
+import { type LucideIcon, ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, Columns2, ArrowLeftRight, ArrowUpRight, Landmark, Eye, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
@@ -79,8 +79,8 @@ const HEBREW_BASE = "/rhema/";
 const DATA_FILES_HEBREW = ["rhema-ot-hebrew.js", "rhema-hebrew-lexicon.js"];
 
 const CROSS_REF_LABELS: Record<string, string> = {
-  d: "Immediate Context", t: "Same Book", o: "Related",
-  n: "NT Connection", f: "OT Foundation", p: "Prophecy",
+  d: "Direct References", t: "Same Book", o: "Related",
+  n: "NT Connection", f: "OT Foundation", p: "Typology & Prophecy",
   a: "Parallel", e: "Theme",
 };
 
@@ -2840,15 +2840,15 @@ function BookOccurrences({ book, strongs, textMode, isHebrew, onNavigate }: {
 }
 
 /* ── CrossRefsPanel ─────────────────────────────────────────── */
-const XREF_CATS = [
-  { key: "d", title: "Direct References",  color: "text-blue-500",   bg: "bg-blue-500/10",   border: "border-blue-500/30",   icon: "↔" },
-  { key: "t", title: "Same Book / Theme",  color: "text-green-600",  bg: "bg-green-500/10",  border: "border-green-500/30",  icon: "📖" },
-  { key: "o", title: "Related Reference",  color: "text-amber-600",  bg: "bg-amber-500/10",  border: "border-amber-500/30",  icon: "🔗" },
-  { key: "n", title: "NT Connection",      color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/30", icon: "✦" },
-  { key: "f", title: "OT Foundation",      color: "text-orange-500", bg: "bg-orange-500/10", border: "border-orange-500/30", icon: "◆" },
-  { key: "p", title: "Prophecy",           color: "text-rose-500",   bg: "bg-rose-500/10",   border: "border-rose-500/30",   icon: "⟶" },
-  { key: "a", title: "Parallel",           color: "text-teal-500",   bg: "bg-teal-500/10",   border: "border-teal-500/30",   icon: "∥" },
-  { key: "e", title: "Theme",              color: "text-indigo-500", bg: "bg-indigo-500/10", border: "border-indigo-500/30", icon: "◉" },
+const XREF_CATS: { key: string; title: string; color: string; bg: string; border: string; icon: LucideIcon }[] = [
+  { key: "d", title: "Direct References",    color: "text-blue-500",   bg: "bg-blue-500/10",   border: "border-blue-500/30",   icon: ArrowLeftRight },
+  { key: "t", title: "Same Book",            color: "text-green-600",  bg: "bg-green-500/10",  border: "border-green-500/30",  icon: BookOpen },
+  { key: "o", title: "Related",              color: "text-amber-600",  bg: "bg-amber-500/10",  border: "border-amber-500/30",  icon: Link2 },
+  { key: "n", title: "NT Connection",        color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/30", icon: ArrowUpRight },
+  { key: "f", title: "OT Foundation",        color: "text-orange-500", bg: "bg-orange-500/10", border: "border-orange-500/30", icon: Landmark },
+  { key: "p", title: "Typology & Prophecy",  color: "text-rose-500",   bg: "bg-rose-500/10",   border: "border-rose-500/30",   icon: Eye },
+  { key: "a", title: "Parallel",             color: "text-teal-500",   bg: "bg-teal-500/10",   border: "border-teal-500/30",   icon: AlignLeft },
+  { key: "e", title: "Theme",                color: "text-indigo-500", bg: "bg-indigo-500/10", border: "border-indigo-500/30", icon: Tag },
 ];
 
 interface XRefTrailEntry { book: string; ch: string; v: string; }
@@ -2966,7 +2966,7 @@ function CrossRefsPanel({
               return (
                 <button key={cat.key} onClick={() => setActiveCatKey(cat.key)}
                   className="w-full text-left flex items-start gap-4 px-5 py-4 border-b border-border-subtle/40 hover:bg-bg-elevated transition-colors">
-                  <span className={cn("text-2xl shrink-0 mt-0.5", cat.color)}>{cat.icon}</span>
+                  <cat.icon className={cn("h-5 w-5 shrink-0 mt-0.5", cat.color)} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <p className="text-sm font-semibold text-text-primary">{cat.title}</p>
@@ -2984,7 +2984,7 @@ function CrossRefsPanel({
           /* Category detail */
           <div className="py-1">
             <div className={cn("flex items-center gap-3 px-5 py-3 mb-1 border-b border-border-subtle/40", activeCat?.bg)}>
-              <span className={cn("text-xl", activeCat?.color)}>{activeCat?.icon}</span>
+              {activeCat && <activeCat.icon className={cn("h-5 w-5", activeCat.color)} />}
               <p className={cn("text-xs font-bold uppercase tracking-wider", activeCat?.color)}>{activeCat?.title}</p>
               <span className={cn("text-xs ml-auto font-bold", activeCat?.color)}>{activeCatRefs.length} references</span>
             </div>
