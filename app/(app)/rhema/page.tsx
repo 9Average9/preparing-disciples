@@ -75,7 +75,7 @@ const DATA_FILES_CORE = [
   "rhema-lexicon.js", "rhema-mm.js", "rhema-msb.js",
   "rhema-bsb.js", "rhema-syntax.js", "rhema-crossrefs.js",
 ];
-const HEBREW_BASE = "https://raw.githubusercontent.com/9Average9/Greek-Vocab/main/";
+const HEBREW_BASE = "/rhema/";
 const DATA_FILES_HEBREW = ["rhema-ot-hebrew.js", "rhema-hebrew-lexicon.js"];
 
 const CROSS_REF_LABELS: Record<string, string> = {
