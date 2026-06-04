@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { type LucideIcon, ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, Columns2, ArrowLeftRight, ArrowUpRight, Landmark, Eye, Tag, Search, SlidersHorizontal, Clock, Plus } from "lucide-react";
+import { type LucideIcon, ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, Columns2, ArrowLeftRight, ArrowUpRight, Landmark, Eye, Tag, Search, SlidersHorizontal, Clock, Plus, BookMarked, ExternalLink, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
@@ -1064,6 +1064,7 @@ export default function RhemaPage() {
   const [showNotes, setShowNotes] = useState(false);
   const [showHighlighter, setShowHighlighter] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showCommentary, setShowCommentary] = useState(false);
 
   // Study workspace
   const [observations, setObservations] = useState("");
@@ -1507,6 +1508,15 @@ export default function RhemaPage() {
             <Columns2 className="h-4 w-4" />
           </ToolBtn>
 
+          {/* Commentary search */}
+          <ToolBtn
+            active={showCommentary}
+            onClick={() => { setShowCommentary(v => !v); setShowCrossRefs(false); setShowNotes(false); setShowLibrary(false); setActiveWord(null); setShowWandPopup(false); }}
+            label="Commentary"
+          >
+            <BookMarked className="h-4 w-4" />
+          </ToolBtn>
+
           {/* Display — contains font size, English, and all other view modes */}
           <div className="relative z-[39]">
             <button
@@ -1700,6 +1710,12 @@ export default function RhemaPage() {
             questions={questions} setQuestions={setQuestions}
             onClose={() => setShowNotes(false)}
             onHighlightWord={highlightWordFromNotes}
+          />
+        )}
+        {showCommentary && (
+          <CommentaryPanel
+            passage={`${BOOK_NAMES[book] || book} ${chapter}:${verse}`}
+            onClose={() => setShowCommentary(false)}
           />
         )}
       </div>
@@ -3682,6 +3698,191 @@ function WordLibraryPanel({ query, setQuery, loaded, isHebrew, onSelectLex, onSe
               </div>
             )}
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── CommentaryPanel ────────────────────────────────────────── */
+interface CommentaryResult {
+  author: string;
+  work: string;
+  year: string;
+  tradition: string;
+  overview: string;
+  link: string;
+  source: string;
+}
+
+function CommentaryPanel({ passage, onClose }: { passage: string; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<CommentaryResult[]>([]);
+  const [offset, setOffset] = useState(0);
+  const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  async function search(newOffset = 0) {
+    if (!query.trim()) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/rhema/commentary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: query.trim(), passage, offset: newOffset }),
+      });
+      const data = await res.json();
+      if (data.error) { setError(data.error); return; }
+      if (newOffset === 0) {
+        setResults(data.commentaries || []);
+        setExpanded(new Set());
+      } else {
+        setResults(prev => [...prev, ...(data.commentaries || [])]);
+      }
+      setOffset(newOffset + 10);
+    } catch {
+      setError("Search failed. Please try again.");
+    }
+    setLoading(false);
+  }
+
+  const TRADITION_COLOR: Record<string, string> = {
+    "free grace": "text-accent border-accent/40 bg-accent/10",
+    "reformed": "text-purple-400 border-purple-500/40 bg-purple-500/10",
+    "evangelical": "text-blue-400 border-blue-500/40 bg-blue-500/10",
+    "catholic": "text-amber-400 border-amber-500/40 bg-amber-500/10",
+    "lutheran": "text-green-400 border-green-500/40 bg-green-500/10",
+    "arminian": "text-rose-400 border-rose-500/40 bg-rose-500/10",
+  };
+  function traditionColor(t: string) {
+    return TRADITION_COLOR[t.toLowerCase()] || "text-text-muted border-border-subtle bg-bg-elevated";
+  }
+
+  return (
+    <div className="w-[420px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3.5 border-b border-border-subtle flex items-center gap-2 shrink-0">
+        <BookMarked className="h-4 w-4 text-accent shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-text-primary">Commentary Search</p>
+          <p className="text-xs text-text-muted mt-0.5 truncate">{passage}</p>
+        </div>
+        <button onClick={onClose} className="text-text-muted hover:text-text-primary shrink-0">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Search input */}
+      <div className="px-4 py-3 border-b border-border-subtle shrink-0">
+        <p className="text-xs text-text-muted mb-2 leading-relaxed">
+          Enter a passage, topic, or theological question to find related commentaries. Free Grace sources appear first.
+        </p>
+        <textarea
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) search(0); }}
+          placeholder={`e.g. "John 3:16 eternal life", "James 2 faith and works", "free grace soteriology"…`}
+          rows={3}
+          className="w-full bg-bg-elevated border border-border-subtle rounded-xl px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
+        />
+        <button
+          onClick={() => search(0)}
+          disabled={loading || !query.trim()}
+          className="mt-2 w-full h-10 flex items-center justify-center gap-2 text-sm font-medium bg-accent/10 border border-accent/40 text-accent hover:bg-accent/20 transition-colors rounded-xl disabled:opacity-50"
+        >
+          {loading && offset === 0
+            ? <><Loader2 className="h-4 w-4 animate-spin" /> Searching…</>
+            : <><Search className="h-4 w-4" /> Find Commentaries</>}
+        </button>
+      </div>
+
+      {/* Results */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {error && (
+          <p className="px-4 py-4 text-sm text-red-400">{error}</p>
+        )}
+
+        {results.length > 0 && (
+          <div className="divide-y divide-border-subtle/40">
+            {results.map((c, i) => {
+              const isOpen = expanded.has(i);
+              const isFreeGrace = c.tradition.toLowerCase().includes("free grace") || c.tradition.toLowerCase().includes("free-grace");
+              return (
+                <div key={i} className={cn("px-4 py-3.5 transition-colors", isFreeGrace && i < 3 && "bg-accent/[0.03]")}>
+                  {/* Top row */}
+                  <div className="flex items-start gap-2 mb-1.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isFreeGrace && i < 3 && (
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-accent shrink-0">★ Free Grace</span>
+                        )}
+                        <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded-full border shrink-0", traditionColor(c.tradition))}>
+                          {c.tradition}
+                        </span>
+                        <span className="text-[10px] text-text-muted shrink-0">{c.year}</span>
+                      </div>
+                      <p className="text-sm font-semibold text-text-primary mt-1 leading-snug">{c.work}</p>
+                      <p className="text-xs text-text-muted">{c.author}</p>
+                    </div>
+                    <a
+                      href={c.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Open at ${c.source}`}
+                      className="h-8 w-8 flex items-center justify-center border border-border-subtle rounded-lg text-text-muted hover:border-accent hover:text-accent transition-colors shrink-0 mt-0.5"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  </div>
+
+                  {/* Overview */}
+                  <button
+                    onClick={() => setExpanded(prev => {
+                      const next = new Set(prev);
+                      if (next.has(i)) next.delete(i); else next.add(i);
+                      return next;
+                    })}
+                    className="w-full text-left"
+                  >
+                    <p className={cn("text-xs text-text-muted leading-relaxed", !isOpen && "line-clamp-2")}>
+                      {c.overview}
+                    </p>
+                    {!isOpen && c.overview.length > 120 && (
+                      <span className="text-[10px] text-accent">Show more</span>
+                    )}
+                  </button>
+
+                  {/* Source label */}
+                  <p className="text-[10px] text-text-muted/60 mt-1.5">{c.source}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Give more */}
+        {results.length > 0 && (
+          <div className="px-4 py-4">
+            <button
+              onClick={() => search(offset)}
+              disabled={loading}
+              className="w-full h-10 flex items-center justify-center gap-2 text-sm border border-border-subtle text-text-muted hover:border-accent hover:text-accent transition-colors rounded-xl disabled:opacity-50"
+            >
+              {loading
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Loading…</>
+                : <><Plus className="h-4 w-4" /> Give me 10 more</>}
+            </button>
+          </div>
+        )}
+
+        {!loading && results.length === 0 && !error && (
+          <div className="px-4 py-8 text-center">
+            <BookMarked className="h-8 w-8 text-text-muted/30 mx-auto mb-3" />
+            <p className="text-sm text-text-muted">Enter a passage or topic above to find commentaries.</p>
+          </div>
         )}
       </div>
     </div>
