@@ -23,13 +23,13 @@ export async function POST(req: NextRequest) {
     const textLabel = isHebrew ? "Hebrew (BHS)" : (textMode === "critical" ? "Greek critical text (NA28/UBS5)" : "Greek majority text (Byzantine)");
     const prefix = isHebrew ? "H" : "G";
 
-    // Build a readable word list for the AI to reference
-    const wordList = Array.isArray(originalWords) && originalWords.length > 0
-      ? (originalWords as Array<{ surface: string; strongs: number }>)
-          .filter(w => w.strongs > 0)
-          .map(w => `${w.surface} (${prefix}${w.strongs})`)
-          .join("  ")
-      : "";
+    // Build original-language text string and annotated word list
+    const words = Array.isArray(originalWords) ? (originalWords as Array<{ surface: string; strongs: number }>) : [];
+    const originalText = words.map(w => w.surface).join(" ");
+    const wordList = words
+      .filter(w => w.strongs > 0)
+      .map(w => `${w.surface} (${prefix}${w.strongs})`)
+      .join("  ");
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 Text: ${textLabel}
 Genre guidance: ${genreInstruction}
 
-${wordList ? `The passage contains these original language words in order:\n${wordList}\n\nWhen you reference one of these words, use the exact format: word (${prefix}NNNNN)\nFor example: "The verb ἠγάπησεν (G25) is aorist, indicating..."\nOnly reference words from the list above. Never invent Strong's numbers.` : ""}
+${wordList ? `The passage's original language words in order (use these for all references):\n${wordList}\n\nWhen you reference a word, use the exact format: word (${prefix}NNNNN)\nExample: "The verb ἠγάπησεν (G25) is aorist active, indicating a completed act of love."\nOnly reference words from the list above. Never invent Strong's numbers.` : ""}
 
 Theological guardrails (apply only when theology is unavoidable — always prefer textual observation first):
 - Salvation is by faith alone in Christ alone, apart from works (Eph 2:8-9, John 3:16, 6:47)
@@ -51,15 +51,17 @@ Theological guardrails (apply only when theology is unavoidable — always prefe
 - "Believe/faith" (πιστεύω/πίστις) means trust and reliance — do not require Lordship commitment
 
 Rules:
+- Observe the original language text primarily — the English is a translation aid only
+- Reference specific words, tenses, moods, voice, case, number, structural patterns
 - Stay faithful to the text — only observe what is actually there
-- Prioritize grammatical and structural observations over theological speculation
-- Be specific: reference actual words, tenses, moods, structural patterns in this verse
 - Do not summarize — observe
 - Format: 4–6 bullet points, each starting with "•"`,
         },
         {
           role: "user",
-          content: `Observe ${ref as string} (${textLabel}, genre: ${genre as string}):\n\n"${englishText as string}"`,
+          content: `Observe ${ref as string} (${textLabel}, genre: ${genre as string}):
+
+${originalText ? `${textLabel}: ${originalText}\n` : ""}English: "${englishText as string}"`,
         },
       ],
       max_tokens: 700,
