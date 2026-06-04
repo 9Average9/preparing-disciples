@@ -15,43 +15,55 @@ const GENRE_INSTRUCTIONS: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   try {
-    const { ref, genre, englishText } = await req.json();
+    const { ref, genre, englishText, textMode, isHebrew, originalWords } = await req.json();
     if (!englishText) return NextResponse.json({ error: "No text provided" }, { status: 400 });
 
     const openai = getOpenAIClient();
     const genreInstruction = GENRE_INSTRUCTIONS[genre as string] || GENRE_INSTRUCTIONS.narrative;
+    const textLabel = isHebrew ? "Hebrew (BHS)" : (textMode === "critical" ? "Greek critical text (NA28/UBS5)" : "Greek majority text (Byzantine)");
+    const prefix = isHebrew ? "H" : "G";
+
+    // Build a readable word list for the AI to reference
+    const wordList = Array.isArray(originalWords) && originalWords.length > 0
+      ? (originalWords as Array<{ surface: string; strongs: number }>)
+          .filter(w => w.strongs > 0)
+          .map(w => `${w.surface} (${prefix}${w.strongs})`)
+          .join("  ")
+      : "";
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are a careful biblical exegesis assistant helping a student observe Scripture before interpreting it.
+          content: `You are a careful biblical exegesis assistant helping a student observe Scripture before interpreting it. Stay strictly faithful to what the text actually says — do not add ideas not present in the passage.
 
-Your job: surface 4–6 specific, textual observations — grammatical, structural, literary — that a careful reader might miss on first reading.
-
+Text: ${textLabel}
 Genre guidance: ${genreInstruction}
 
-Theological guardrails (apply only when theology is unavoidable):
+${wordList ? `The passage contains these original language words in order:\n${wordList}\n\nWhen you reference one of these words, use the exact format: word (${prefix}NNNNN)\nFor example: "The verb ἠγάπησεν (G25) is aorist, indicating..."\nOnly reference words from the list above. Never invent Strong's numbers.` : ""}
+
+Theological guardrails (apply only when theology is unavoidable — always prefer textual observation first):
 - Salvation is by faith alone in Christ alone, apart from works (Eph 2:8-9, John 3:16, 6:47)
-- Believers can have full assurance of eternal life now (1 John 5:13, John 10:28)
-- Distinguish salvation passages from discipleship/rewards passages
-- James and similar "works" passages address evidence and community life, not the ground of justification before God
-- Do not assume "believe" requires commitment to Lordship — the Greek pisteuo means trust/reliance
+- Believers can have full, present assurance of eternal life (1 John 5:13, John 10:28)
+- Distinguish passages about salvation from passages about discipleship, rewards, or community life
+- James and similar passages address living faith in community, not the ground of justification
+- "Believe/faith" (πιστεύω/πίστις) means trust and reliance — do not require Lordship commitment
 
 Rules:
-- Prioritize textual and grammatical observations over theological conclusions
-- Reference specific words or phrases in the text
-- Do not summarize the passage — observe it
-- Format as 4–6 bullet points, each starting with "•"`,
+- Stay faithful to the text — only observe what is actually there
+- Prioritize grammatical and structural observations over theological speculation
+- Be specific: reference actual words, tenses, moods, structural patterns in this verse
+- Do not summarize — observe
+- Format: 4–6 bullet points, each starting with "•"`,
         },
         {
           role: "user",
-          content: `Observe ${ref as string} (genre: ${genre as string}):\n\n"${englishText as string}"`,
+          content: `Observe ${ref as string} (${textLabel}, genre: ${genre as string}):\n\n"${englishText as string}"`,
         },
       ],
-      max_tokens: 650,
-      temperature: 0.3,
+      max_tokens: 700,
+      temperature: 0.25,
     });
 
     const text = completion.choices[0]?.message?.content || "";
