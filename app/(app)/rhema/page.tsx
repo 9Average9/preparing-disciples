@@ -932,6 +932,8 @@ export default function RhemaPage() {
 
   // Navigation history (persisted in localStorage)
   const [navHistory, setNavHistory] = useState<Array<{ book: string; chapter: string; verse: string }>>([]);
+  const [navCursor, setNavCursor] = useState<number>(-1); // index into navHistory, -1 = at endpoint
+  const [navEndpoint, setNavEndpoint] = useState<{ book: string; chapter: string; verse: string } | null>(null);
 
   // Right panel state
   const [showCrossRefs, setShowCrossRefs] = useState(false);
@@ -1122,6 +1124,8 @@ export default function RhemaPage() {
 
   function handleNavigateOccurrence(b: string, ch: string, v: string) {
     setNavHistory(h => [...h, { book, chapter, verse }]);
+    setNavCursor(-1);
+    setNavEndpoint({ book: b, chapter: ch, verse: v });
     setBook(b); setChapter(ch); setVerse(v);
     setFullChapter(false); setActiveWord(null);
   }
@@ -1136,8 +1140,16 @@ export default function RhemaPage() {
 
   function jumpToHistoryStop(idx: number) {
     const stop = navHistory[idx];
-    // Don't truncate — all stops remain so the user can freely move between them
+    setNavCursor(idx);
     setBook(stop.book); setChapter(stop.chapter); setVerse(stop.verse);
+    setActiveWord(null);
+  }
+
+  function jumpToEndpoint() {
+    const ep = navEndpoint;
+    if (!ep) return;
+    setNavCursor(-1);
+    setBook(ep.book); setChapter(ep.chapter); setVerse(ep.verse);
     setActiveWord(null);
   }
 
@@ -1473,17 +1485,32 @@ export default function RhemaPage() {
             <span key={idx} className="flex items-center shrink-0">
               <button
                 onClick={() => jumpToHistoryStop(idx)}
-                className="text-xs text-accent hover:text-accent-hover whitespace-nowrap px-1.5 py-1 hover:bg-bg-elevated transition-colors rounded-sm"
+                className={cn(
+                  "text-xs whitespace-nowrap px-1.5 py-1 transition-colors rounded-sm",
+                  navCursor === idx
+                    ? "bg-accent/15 text-accent font-semibold"
+                    : "text-accent/70 hover:text-accent hover:bg-bg-elevated"
+                )}
               >
                 {BOOK_NAMES[stop.book] || stop.book} {stop.chapter}:{stop.verse}
               </button>
               <ChevronRight className="h-3 w-3 text-text-muted opacity-30 shrink-0" />
             </span>
           ))}
-          <span className="text-xs text-text-primary font-medium whitespace-nowrap px-1.5 py-1 shrink-0">
-            {bookName} {chapter}:{verse}
-          </span>
-          <button onClick={() => setNavHistory([])}
+          <button
+            onClick={jumpToEndpoint}
+            className={cn(
+              "text-xs whitespace-nowrap px-1.5 py-1 transition-colors rounded-sm shrink-0",
+              navCursor === -1
+                ? "bg-accent/15 text-text-primary font-semibold"
+                : "text-text-primary font-medium hover:bg-bg-elevated"
+            )}
+          >
+            {navEndpoint
+              ? `${BOOK_NAMES[navEndpoint.book] || navEndpoint.book} ${navEndpoint.chapter}:${navEndpoint.verse}`
+              : `${bookName} ${chapter}:${verse}`}
+          </button>
+          <button onClick={() => { setNavHistory([]); setNavCursor(-1); setNavEndpoint(null); }}
             className="ml-3 text-xs text-text-muted hover:text-danger transition-colors opacity-50 hover:opacity-100 shrink-0">
             ✕
           </button>
@@ -2143,7 +2170,9 @@ function PhraseBuilderView({
   const [activeLabel, setActiveLabel] = useState(initialLabel);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const rowEls = useRef<Map<string, HTMLDivElement>>(new Map());
 
+  // Single-phrase drag
   const dragRef = useRef<{
     rowIdx: number; wordIdx: number;
     startX: number; startY: number;
@@ -2155,11 +2184,25 @@ function PhraseBuilderView({
     cursorX: number; cursorY: number;
   } | null>(null);
 
+  // Box selection
+  const selBoxRef = useRef<{ startX: number; startY: number; active: boolean } | null>(null);
+  const [selBox, setSelBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Group drag (moves all selected rows together)
+  const groupDragRef = useRef<{
+    startX: number; startY: number;
+    activated: boolean;
+    rowOffsets: Map<string, { ox: number; oy: number }>;
+  } | null>(null);
+  const [groupDelta, setGroupDelta] = useState<{ dx: number; dy: number } | null>(null);
+
   useEffect(() => {
     const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
     setRefInput(label); setActiveLabel(label);
     setRows(buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
     setRefError("");
+    setSelectedIds(new Set());
   }, [book, chapter, verse, textMode]);
 
   function loadRef() {
@@ -2167,18 +2210,96 @@ function PhraseBuilderView({
     if (!parsed) { setRefError("Couldn't parse reference. Try: \"Gen 5:8-13\""); return; }
     const newRows = buildPhraseRows(parsed.book, parsed.ch, parsed.startV, parsed.endV, textMode);
     if (!newRows[0].words.length) { setRefError("No English text found for that reference."); return; }
-    setRows(newRows); setRefError("");
+    setRows(newRows); setRefError(""); setSelectedIds(new Set());
     const end = parsed.startV === parsed.endV ? "" : `–${parsed.endV}`;
     setActiveLabel(`${BOOK_NAMES[parsed.book] || parsed.book} ${parsed.ch}:${parsed.startV}${end}`);
   }
 
+  // ── Box selection handlers (canvas background) ──
+  function onCanvasPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.target !== containerRef.current) return;
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const rect = containerRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top + containerRef.current!.scrollTop;
+    selBoxRef.current = { startX: x, startY: y, active: false };
+    setSelBox(null);
+  }
+
+  function onCanvasPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const sb = selBoxRef.current;
+    if (!sb) return;
+    const rect = containerRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top + containerRef.current!.scrollTop;
+    const dx = x - sb.startX, dy = y - sb.startY;
+    if (!sb.active && Math.sqrt(dx * dx + dy * dy) < 6) return;
+    sb.active = true;
+    setSelBox({
+      x1: Math.min(sb.startX, x), y1: Math.min(sb.startY, y),
+      x2: Math.max(sb.startX, x), y2: Math.max(sb.startY, y),
+    });
+  }
+
+  function onCanvasPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    const sb = selBoxRef.current;
+    if (!sb) return;
+    selBoxRef.current = null;
+    const box = selBox;
+    setSelBox(null);
+    if (!sb.active || !box) return;
+
+    const containerEl = containerRef.current!;
+    const containerRect = containerEl.getBoundingClientRect();
+    const newSelected = new Set<string>();
+    rowEls.current.forEach((rowEl, rowId) => {
+      const rRect = rowEl.getBoundingClientRect();
+      const rx1 = rRect.left - containerRect.left;
+      const ry1 = rRect.top - containerRect.top + containerEl.scrollTop;
+      const rx2 = rx1 + rRect.width;
+      const ry2 = ry1 + rRect.height;
+      if (rx2 > box.x1 && rx1 < box.x2 && ry2 > box.y1 && ry1 < box.y2) {
+        newSelected.add(rowId);
+      }
+    });
+    setSelectedIds(newSelected);
+  }
+
+  // ── Word drag handlers ──
   function onWordPointerDown(e: React.PointerEvent, rIdx: number, wIdx: number) {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const rowId = rows[rIdx]?.id;
+
+    // If this row is part of the selection, start a group drag
+    if (rowId && selectedIds.has(rowId)) {
+      const offsets = new Map<string, { ox: number; oy: number }>();
+      const anchorRow = rows[rIdx];
+      rows.forEach(r => {
+        if (selectedIds.has(r.id)) {
+          offsets.set(r.id, { ox: r.x - anchorRow.x, oy: r.y - anchorRow.y });
+        }
+      });
+      groupDragRef.current = { startX: e.clientX, startY: e.clientY, activated: false, rowOffsets: offsets };
+      return;
+    }
+
     dragRef.current = { rowIdx: rIdx, wordIdx: wIdx, startX: e.clientX, startY: e.clientY, activated: false };
   }
 
   function onWordPointerMove(e: React.PointerEvent, rIdx: number, wIdx: number) {
+    // Group drag
+    const gd = groupDragRef.current;
+    if (gd) {
+      const dx = e.clientX - gd.startX, dy = e.clientY - gd.startY;
+      if (!gd.activated && Math.sqrt(dx * dx + dy * dy) < 8) return;
+      gd.activated = true;
+      setGroupDelta({ dx, dy });
+      return;
+    }
+
+    // Single drag
     const d = dragRef.current;
     if (!d || d.rowIdx !== rIdx || d.wordIdx !== wIdx) return;
     const dx = e.clientX - d.startX;
@@ -2189,6 +2310,24 @@ function PhraseBuilderView({
   }
 
   function onWordPointerUp(e: React.PointerEvent, rIdx: number, wIdx: number) {
+    // Group drag finish
+    const gd = groupDragRef.current;
+    if (gd) {
+      const wasActivated = gd.activated;
+      groupDragRef.current = null;
+      setGroupDelta(null);
+      if (wasActivated) {
+        const dx = e.clientX - gd.startX;
+        const dy = e.clientY - gd.startY;
+        setRows(prev => prev.map(r => {
+          if (!selectedIds.has(r.id)) return r;
+          return { ...r, x: Math.max(0, r.x + dx), y: Math.max(0, r.y + dy) };
+        }));
+      }
+      return;
+    }
+
+    // Single drag finish
     const d = dragRef.current;
     if (!d) return;
     const wasActivated = d.activated;
@@ -2200,7 +2339,6 @@ function PhraseBuilderView({
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    // Offset matches the ghost overlay position so phrase lands exactly under the words
     const dropX = Math.max(0, e.clientX - rect.left - 14);
     const dropY = Math.max(0, e.clientY - rect.top + el.scrollTop - 16);
 
@@ -2242,14 +2380,14 @@ function PhraseBuilderView({
             const label = `${BOOK_NAMES[book] || book} ${chapter}:${verse}`;
             setRefInput(label); setActiveLabel(label);
             setRows(buildPhraseRows(book, chapter, parseInt(verse), parseInt(verse), textMode));
-            setRefError("");
+            setRefError(""); setSelectedIds(new Set());
           }}
           className="h-7 px-2 text-xs border border-border-subtle text-text-muted hover:text-text-primary transition-colors rounded-lg shrink-0"
         >Reset</button>
         {refError && <span className="text-xs text-red-400">{refError}</span>}
       </div>
 
-      {/* ── Ghost overlay ── */}
+      {/* ── Ghost overlay (single drag) ── */}
       {dragView && (() => {
         const ghostWords = rows[dragView.rowIdx]?.words.slice(dragView.wordIdx) ?? [];
         return (
@@ -2269,19 +2407,36 @@ function PhraseBuilderView({
         ref={containerRef}
         className="relative flex-1 overflow-auto select-none rounded-xl border border-border-subtle/30"
         style={{ minHeight: `${canvasHeight}px` }}
+        onPointerDown={onCanvasPointerDown}
+        onPointerMove={onCanvasPointerMove}
+        onPointerUp={onCanvasPointerUp}
       >
         {isEmpty && (
           <p className="absolute top-8 left-6 text-sm text-text-muted opacity-40">No text found for this passage.</p>
         )}
-        {rows.map((row, rIdx) => (
+        {/* Box selection rectangle */}
+        {selBox && (
+          <div
+            className="absolute pointer-events-none border-2 border-dashed border-accent/60 bg-accent/5 rounded"
+            style={{ left: selBox.x1, top: selBox.y1, width: selBox.x2 - selBox.x1, height: selBox.y2 - selBox.y1 }}
+          />
+        )}
+        {rows.map((row, rIdx) => {
+          const isSelected = selectedIds.has(row.id);
+          const gDelta = groupDelta && isSelected ? groupDelta : null;
+          return (
           <div
             key={row.id}
-            className="absolute flex flex-wrap items-baseline gap-x-[0.4em] gap-y-0"
+            ref={(el) => { if (el) rowEls.current.set(row.id, el); else rowEls.current.delete(row.id); }}
+            className={cn(
+              "absolute flex flex-wrap items-baseline gap-x-[0.4em] gap-y-0 rounded-md",
+              isSelected && "ring-1 ring-accent/40 bg-accent/5 px-1"
+            )}
             style={{
-              left: row.x,
-              top: row.y,
+              left: row.x + (gDelta?.dx ?? 0),
+              top: row.y + (gDelta?.dy ?? 0),
               opacity: dragView?.rowIdx === rIdx ? 0.1 : 1,
-              transition: "opacity 80ms",
+              transition: gDelta ? "none" : "opacity 80ms",
             }}
           >
             {row.verseLabel && (
@@ -2301,7 +2456,8 @@ function PhraseBuilderView({
               </span>
             ))}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -2846,7 +3002,7 @@ const XREF_CATS: { key: string; title: string; color: string; bg: string; border
   { key: "o", title: "Related",              color: "text-amber-600",  bg: "bg-amber-500/10",  border: "border-amber-500/30",  icon: Link2 },
   { key: "n", title: "NT Connection",        color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/30", icon: ArrowUpRight },
   { key: "f", title: "OT Foundation",        color: "text-orange-500", bg: "bg-orange-500/10", border: "border-orange-500/30", icon: Landmark },
-  { key: "p", title: "Typology & Prophecy",  color: "text-rose-500",   bg: "bg-rose-500/10",   border: "border-rose-500/30",   icon: Eye },
+  { key: "p", title: "Prophecy",             color: "text-rose-500",   bg: "bg-rose-500/10",   border: "border-rose-500/30",   icon: Eye },
   { key: "a", title: "Parallel",             color: "text-teal-500",   bg: "bg-teal-500/10",   border: "border-teal-500/30",   icon: AlignLeft },
   { key: "e", title: "Theme",                color: "text-indigo-500", bg: "bg-indigo-500/10", border: "border-indigo-500/30", icon: Tag },
 ];
