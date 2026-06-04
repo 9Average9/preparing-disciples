@@ -1277,6 +1277,12 @@ export default function RhemaPage() {
     setActiveWord(null);
   }
 
+  function highlightWordFromNotes(strongs: number) {
+    const ws = getWords(book, chapter, verse, textMode, isHebrew);
+    const found = ws.find(w => w[1] === strongs);
+    if (found) setActiveWord(found);
+  }
+
   function copyVerse() {
     const ws = getWords(book, chapter, verse, textMode, isHebrew);
     const scriptText = ws.map(w => w[0]).join(" ");
@@ -1745,6 +1751,7 @@ export default function RhemaPage() {
         {showNotes && (
           <StudyWorkspacePanel
             book={book} chapter={chapter} verse={verse} textMode={textMode}
+            isHebrew={isHebrew}
             activeTab={studyTab} onTabChange={setStudyTab}
             observations={observations} setObservations={setObservations}
             interpretations={interpretations} setInterpretations={setInterpretations}
@@ -1753,6 +1760,7 @@ export default function RhemaPage() {
             noteSaving={noteSaving} noteSaved={noteSaved}
             onSave={saveNotes}
             onClose={() => setShowNotes(false)}
+            onHighlightWord={highlightWordFromNotes}
           />
         )}
       </div>
@@ -3718,6 +3726,46 @@ function WordLibraryPanel({ query, setQuery, loaded, isHebrew, onSelectLex, onSe
   );
 }
 
+/* ── ObservationRich — renders AI text with clickable word refs ── */
+function ObservationRich({ text, onWordClick }: { text: string; onWordClick?: (strongs: number) => void }) {
+  const PATTERN = /(\S+)\s+\(([GH])(\d+)\)/g;
+  const lines = text.split("\n").filter(l => l.trim());
+  return (
+    <div className="flex flex-col gap-2">
+      {lines.map((line, li) => {
+        const isBullet = line.trim().startsWith("•");
+        const raw = isBullet ? line.trim().slice(1).trim() : line.trim();
+        const segments: { t: "text" | "word"; text: string; strongs?: number }[] = [];
+        let last = 0; PATTERN.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = PATTERN.exec(raw)) !== null) {
+          if (m.index > last) segments.push({ t: "text", text: raw.slice(last, m.index) });
+          segments.push({ t: "word", text: m[0], strongs: parseInt(m[3]) });
+          last = m.index + m[0].length;
+        }
+        if (last < raw.length) segments.push({ t: "text", text: raw.slice(last) });
+        return (
+          <div key={li} className="text-xs text-text-primary leading-relaxed flex gap-1.5 items-start">
+            {isBullet && <span className="text-accent shrink-0 select-none mt-0.5">•</span>}
+            <span>
+              {segments.map((seg, si) =>
+                seg.t === "word" && seg.strongs !== undefined
+                  ? <button key={si} onClick={() => onWordClick?.(seg.strongs!)}
+                      className="text-accent font-semibold underline decoration-dotted underline-offset-2 hover:bg-accent/15 transition-colors rounded px-0.5"
+                      style={{ fontFamily: "Georgia,'Times New Roman',serif" }}
+                      title="Highlight in verse">
+                      {seg.text}
+                    </button>
+                  : <span key={si}>{seg.text}</span>
+              )}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── StudyWorkspacePanel ────────────────────────────────────── */
 type WorkspaceTab = "observations" | "interpretations" | "applications" | "questions";
 
@@ -3729,15 +3777,15 @@ const WS_META: Record<WorkspaceTab, { label: string; placeholder: string }> = {
 };
 
 function StudyWorkspacePanel({
-  book, chapter, verse, textMode,
+  book, chapter, verse, textMode, isHebrew,
   activeTab, onTabChange,
   observations, setObservations,
   interpretations, setInterpretations,
   applications, setApplications,
   questions, setQuestions,
-  noteSaving, noteSaved, onSave, onClose,
+  noteSaving, noteSaved, onSave, onClose, onHighlightWord,
 }: {
-  book: string; chapter: string; verse: string; textMode: TextMode;
+  book: string; chapter: string; verse: string; textMode: TextMode; isHebrew: boolean;
   activeTab: WorkspaceTab; onTabChange: (t: WorkspaceTab) => void;
   observations: string; setObservations: (v: string) => void;
   interpretations: string; setInterpretations: (v: string) => void;
@@ -3745,11 +3793,16 @@ function StudyWorkspacePanel({
   questions: string; setQuestions: (v: string) => void;
   noteSaving: boolean; noteSaved: boolean;
   onSave: () => void; onClose: () => void;
+  onHighlightWord: (strongs: number) => void;
 }) {
   const { user } = useAuthContext();
   const [verseThemes, setVerseThemes] = useState<Set<string>>(new Set());
   const [aiGenerating, setAiGenerating] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const [aiObservations, setAiObservations] = useState("");
+
+  /* Clear AI observations when verse changes */
+  useEffect(() => { setAiObservations(""); }, [book, chapter, verse]);
 
   /* Load themes when verse changes */
   useEffect(() => {
@@ -3780,6 +3833,7 @@ function StudyWorkspacePanel({
     setAiGenerating(true);
     try {
       const englishText = getEnglishText(book, chapter, verse, textMode);
+      const ws = getWords(book, chapter, verse, textMode, isHebrew);
       const res = await fetch("/api/rhema/observe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3787,11 +3841,14 @@ function StudyWorkspacePanel({
           ref: `${BOOK_NAMES[book] || book} ${chapter}:${verse}`,
           genre: BOOK_GENRE[book] || "narrative",
           englishText,
+          textMode,
+          isHebrew,
+          originalWords: ws.map(w => ({ surface: w[0], strongs: w[1] })),
         }),
       });
       const data = await res.json();
       if (data.text) {
-        setObservations(observations ? `${observations}\n\n─── AI Observations ───\n${data.text}` : data.text);
+        setAiObservations(data.text);
         onTabChange("observations");
       }
     } catch { /* ignore */ }
@@ -3870,17 +3927,26 @@ function StudyWorkspacePanel({
         </div>
       )}
 
-      {/* Textarea */}
-      <div className="flex-1 overflow-hidden px-4 pt-2 pb-2 flex flex-col gap-2 min-h-0">
+      {/* Textarea + AI observations */}
+      <div className="flex-1 overflow-y-auto px-4 pt-2 pb-2 flex flex-col gap-2 min-h-0">
         <textarea
           value={value}
           onChange={e => setValue(e.target.value)}
           placeholder={meta.placeholder}
-          className="flex-1 w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed min-h-0"
+          className="w-full bg-bg-elevated border border-border-subtle px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-accent leading-relaxed"
+          rows={6}
         />
 
+        {/* AI observations — shown below textarea when generated */}
+        {activeTab === "observations" && aiObservations && (
+          <div className="shrink-0 bg-bg-elevated/50 border border-border-subtle rounded-lg px-3 py-2.5">
+            <p className="text-[9px] text-accent font-semibold uppercase tracking-widest mb-2">AI Observations</p>
+            <ObservationRich text={aiObservations} onWordClick={onHighlightWord} />
+          </div>
+        )}
+
         {/* Genre starter prompts — shown when Observe is empty */}
-        {activeTab === "observations" && !observations && genrePrompts.length > 0 && (
+        {activeTab === "observations" && !observations && !aiObservations && genrePrompts.length > 0 && (
           <div className="shrink-0">
             <p className="text-[9px] text-text-muted uppercase tracking-widest mb-1.5">Starter questions</p>
             <div className="flex flex-wrap gap-1">
