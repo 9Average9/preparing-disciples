@@ -12,7 +12,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Disciple Builder",
+  title: "Preparing Disciples",
   description: "From study to sermon. Every word yours.",
   icons: {
     icon: "/icon.svg",
