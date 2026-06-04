@@ -12,8 +12,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Preparing Disciples",
+  title: "Disciple Builder",
   description: "From study to sermon. Every word yours.",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+    shortcut: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

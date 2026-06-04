@@ -1164,6 +1164,18 @@ export default function RhemaPage() {
     setNoteSaving(false);
   }
 
+  async function saveXrefTrail(trail: Array<{ book: string; ch: string; v: string }>) {
+    if (!user) return;
+    const display = trail.map(t => `${BOOK_NAMES[t.book] || t.book} ${t.ch}:${t.v}`).join(" → ");
+    const trailRef = doc(db, "rhema_xref_trails", user.uid, "trails", Date.now().toString());
+    await setDoc(trailRef, {
+      trail: trail.map(t => `${t.book} ${t.ch}:${t.v}`),
+      display,
+      startRef: `${book} ${chapter}:${verse}`,
+      createdAt: new Date(),
+    });
+  }
+
   function closeAllPanels() {
     setActiveWord(null);
     setShowCrossRefs(false);
@@ -1553,9 +1565,10 @@ export default function RhemaPage() {
         {showCrossRefs && (
           <CrossRefsPanel
             book={book} chapter={chapter} verse={verse}
-            crossRefs={crossRefs} textMode={textMode}
+            textMode={textMode}
             onClose={() => setShowCrossRefs(false)}
-            onNavigate={(b, ch, v) => { handleNavigateOccurrence(b, ch, v); setShowCrossRefs(false); }}
+            onNavigate={(b, ch, v) => handleNavigateOccurrence(b, ch, v)}
+            onSaveTrail={user ? saveXrefTrail : undefined}
           />
         )}
         {showLibrary && (
@@ -2187,8 +2200,9 @@ function PhraseBuilderView({
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const dropX = Math.max(0, e.clientX - rect.left);
-    const dropY = Math.max(0, e.clientY - rect.top + el.scrollTop);
+    // Offset matches the ghost overlay position so phrase lands exactly under the words
+    const dropX = Math.max(0, e.clientX - rect.left - 14);
+    const dropY = Math.max(0, e.clientY - rect.top + el.scrollTop - 16);
 
     setRows(prev => {
       const next = [...prev];
@@ -2826,61 +2840,198 @@ function BookOccurrences({ book, strongs, textMode, isHebrew, onNavigate }: {
 }
 
 /* ── CrossRefsPanel ─────────────────────────────────────────── */
-const CROSS_REF_ICONS: Record<string, string> = {
-  d: "↔", t: "📖", o: "🔗", n: "✦", f: "◆", p: "⟶", a: "∥", e: "◉",
-};
+const XREF_CATS = [
+  { key: "d", title: "Direct References",  color: "text-blue-500",   bg: "bg-blue-500/10",   border: "border-blue-500/30",   icon: "↔" },
+  { key: "t", title: "Same Book / Theme",  color: "text-green-600",  bg: "bg-green-500/10",  border: "border-green-500/30",  icon: "📖" },
+  { key: "o", title: "Related Reference",  color: "text-amber-600",  bg: "bg-amber-500/10",  border: "border-amber-500/30",  icon: "🔗" },
+  { key: "n", title: "NT Connection",      color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/30", icon: "✦" },
+  { key: "f", title: "OT Foundation",      color: "text-orange-500", bg: "bg-orange-500/10", border: "border-orange-500/30", icon: "◆" },
+  { key: "p", title: "Prophecy",           color: "text-rose-500",   bg: "bg-rose-500/10",   border: "border-rose-500/30",   icon: "⟶" },
+  { key: "a", title: "Parallel",           color: "text-teal-500",   bg: "bg-teal-500/10",   border: "border-teal-500/30",   icon: "∥" },
+  { key: "e", title: "Theme",              color: "text-indigo-500", bg: "bg-indigo-500/10", border: "border-indigo-500/30", icon: "◉" },
+];
 
-function CrossRefsPanel({ book, chapter, verse, crossRefs, onClose, onNavigate, textMode }: {
-  book: string; chapter: string; verse: string;
-  crossRefs: Record<string, string[]> | null;
+interface XRefTrailEntry { book: string; ch: string; v: string; }
+
+function CrossRefsPanel({
+  book, chapter, verse, textMode, onClose, onNavigate, onSaveTrail,
+}: {
+  book: string; chapter: string; verse: string; textMode: TextMode;
   onClose: () => void;
   onNavigate: (book: string, ch: string, v: string) => void;
-  textMode: TextMode;
+  onSaveTrail?: (trail: XRefTrailEntry[]) => Promise<void>;
 }) {
-  const labels = window.RhemaCrossRefLabels || [];
-  const hasAny = !!crossRefs && Object.values(crossRefs).some(a => a?.length > 0);
+  const [trail, setTrail] = useState<XRefTrailEntry[]>([{ book, ch: chapter, v: verse }]);
+  const [cursor, setCursor] = useState(0);
+  const [activeCatKey, setActiveCatKey] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setTrail([{ book, ch: chapter, v: verse }]);
+    setCursor(0); setActiveCatKey(null);
+  }, [book, chapter, verse]);
+
+  const current = trail[cursor];
+  const xrefs = window.RhemaCrossRefs?.[`${current.book} ${current.ch}:${current.v}`] || null;
+  const hasAny = !!xrefs && Object.values(xrefs).some(a => a?.length > 0);
+
+  function followRef(ref: string) {
+    const p = parseCrossRefKey(ref);
+    if (!p) return;
+    const newTrail = [...trail.slice(0, cursor + 1), { book: p.book, ch: p.ch, v: p.v }];
+    setTrail(newTrail); setCursor(newTrail.length - 1); setActiveCatKey(null);
+  }
+
+  async function handleSave() {
+    if (!onSaveTrail) return;
+    setSaving(true);
+    try { await onSaveTrail(trail); setSaved(true); setTimeout(() => setSaved(false), 2500); }
+    finally { setSaving(false); }
+  }
+
+  const activeCat = XREF_CATS.find(c => c.key === activeCatKey);
+  const activeCatRefs = activeCatKey ? (xrefs?.[activeCatKey] || []) : [];
+  const currentVerseName = `${BOOK_NAMES[current.book] || current.book} ${current.ch}:${current.v}`;
+  const currentText = getEnglishText(current.book, current.ch, current.v, textMode);
+
   return (
     <div className="w-[300px] shrink-0 border-l border-border-subtle bg-bg-surface flex flex-col overflow-hidden animate-slideInRight">
-      <PanelHeader title="Cross References" subtitle={`${BOOK_NAMES[book] || book} ${chapter}:${verse}`} onClose={onClose} />
+      {/* Header */}
+      <div className="px-3 py-2.5 border-b border-border-subtle shrink-0">
+        <div className="flex items-center gap-2 mb-1">
+          {(cursor > 0 || activeCatKey) && (
+            <button onClick={activeCatKey ? () => setActiveCatKey(null) : () => { setCursor(c => c - 1); setActiveCatKey(null); }}
+              className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-muted hover:text-text-primary transition-colors shrink-0">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-text-primary truncate">
+              {activeCat ? activeCat.title : "Cross References"}
+            </p>
+            <p className="text-[10px] text-text-muted/60 truncate">{currentVerseName}</p>
+          </div>
+          <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-muted transition-colors shrink-0">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        {/* Breadcrumb trail */}
+        {trail.length > 1 && (
+          <div className="flex items-center gap-1 flex-wrap">
+            {trail.map((t, i) => (
+              <span key={i} className="flex items-center gap-1">
+                {i > 0 && <span className="text-[8px] text-text-muted/30">›</span>}
+                <button onClick={() => { setCursor(i); setActiveCatKey(null); }}
+                  className={cn("text-[9px] px-1.5 py-0.5 rounded transition-colors",
+                    i === cursor ? "bg-accent/15 text-accent font-semibold" : "text-text-muted hover:text-text-primary hover:bg-bg-elevated")}>
+                  {BOOK_NAMES[t.book] || t.book} {t.ch}:{t.v}
+                </button>
+              </span>
+            ))}
+            <button onClick={() => { setTrail([trail[0]]); setCursor(0); setActiveCatKey(null); }}
+              className="ml-auto text-text-muted/40 hover:text-text-muted transition-colors" title="Clear trail">
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Current verse card */}
+      <div className="px-3 py-2.5 border-b border-border-subtle bg-bg-elevated/30 shrink-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-bold text-accent mb-0.5">{currentVerseName}</p>
+            {currentText && <p className="text-[11px] text-text-muted leading-relaxed line-clamp-3">{currentText}</p>}
+          </div>
+          <button onClick={() => onNavigate(current.book, current.ch, current.v)}
+            className="text-[9px] px-2 py-1 border border-border-subtle rounded-lg text-text-muted hover:border-accent hover:text-accent transition-colors shrink-0 mt-0.5">
+            Go →
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        {!hasAny ? (
-          <p className="text-sm text-text-muted opacity-60 p-4">No cross references for this verse.</p>
-        ) : (
-          <div className="flex flex-col">
-            {Object.entries(crossRefs!).map(([key, refs], ci) => {
-              if (!refs?.length) return null;
-              const label = labels[ci] || CROSS_REF_LABELS[key] || key.toUpperCase();
-              const icon = CROSS_REF_ICONS[key] || "•";
+        {!activeCatKey ? (
+          /* Category cards */
+          <div className="py-1">
+            {!hasAny && <p className="text-xs text-text-muted opacity-60 px-4 py-4">No cross references for this verse.</p>}
+            {XREF_CATS.map(cat => {
+              const refs = xrefs?.[cat.key] || [];
+              if (!refs.length) return null;
+              const firstParsed = parseCrossRefKey(refs[0]);
+              const preview = firstParsed ? getEnglishText(firstParsed.book, firstParsed.ch, firstParsed.v, textMode) : "";
+              const firstName = firstParsed ? `${BOOK_NAMES[firstParsed.book] || firstParsed.book} ${firstParsed.ch}:${firstParsed.v}` : "";
               return (
-                <div key={key} className="border-b border-border-subtle/50 last:border-0">
-                  <p className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-text-muted uppercase tracking-widest flex items-center gap-1.5">
-                    <span className="opacity-60">{icon}</span>{label}
-                  </p>
-                  <div className="flex flex-col divide-y divide-border-subtle/30">
-                    {refs.map((r, i) => {
-                      const parsed = parseCrossRefKey(r);
-                      if (!parsed) return null;
-                      const preview = getEnglishText(parsed.book, parsed.ch, parsed.v, textMode);
-                      const previewShort = preview.length > 80 ? preview.slice(0, 77) + "…" : preview;
-                      return (
-                        <button key={i} onClick={() => onNavigate(parsed.book, parsed.ch, parsed.v)}
-                          className="w-full text-left px-4 py-2.5 hover:bg-bg-elevated transition-colors group">
-                          <p className="text-xs font-semibold text-accent group-hover:text-accent-hover mb-0.5">
-                            {BOOK_NAMES[parsed.book] || parsed.book} {parsed.ch}:{parsed.v}
-                          </p>
-                          {previewShort && (
-                            <p className="text-[11px] text-text-muted leading-relaxed opacity-70">{previewShort}</p>
-                          )}
-                        </button>
-                      );
-                    })}
+                <button key={cat.key} onClick={() => setActiveCatKey(cat.key)}
+                  className="w-full text-left flex items-start gap-3 px-3 py-3 border-b border-border-subtle/40 hover:bg-bg-elevated transition-colors">
+                  <span className={cn("text-base shrink-0 mt-0.5", cat.color)}>{cat.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <p className="text-xs font-semibold text-text-primary">{cat.title}</p>
+                      <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0", cat.bg, cat.color)}>{refs.length}</span>
+                    </div>
+                    {firstName && <p className="text-[10px] text-text-muted/70 truncate font-medium">{firstName}</p>}
+                    {preview && <p className="text-[10px] text-text-muted/45 truncate">{preview.slice(0, 60)}{preview.length > 60 ? "…" : ""}</p>}
                   </div>
+                  <ChevronRight className="h-3.5 w-3.5 text-text-muted/30 shrink-0 mt-1.5" />
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          /* Category detail */
+          <div className="py-1">
+            <div className={cn("flex items-center gap-2 px-3 py-2 mb-0.5 border-b border-border-subtle/40", activeCat?.bg)}>
+              <span className={cn("text-sm", activeCat?.color)}>{activeCat?.icon}</span>
+              <p className={cn("text-[10px] font-bold uppercase tracking-wider", activeCat?.color)}>{activeCat?.title}</p>
+              <span className={cn("text-[10px] ml-auto font-bold", activeCat?.color)}>{activeCatRefs.length}</span>
+            </div>
+            {activeCatRefs.map((ref, i) => {
+              const parsed = parseCrossRefKey(ref);
+              if (!parsed) return null;
+              const text = getEnglishText(parsed.book, parsed.ch, parsed.v, textMode);
+              const name = `${BOOK_NAMES[parsed.book] || parsed.book} ${parsed.ch}:${parsed.v}`;
+              const hasSubs = !!(window.RhemaCrossRefs?.[`${parsed.book} ${parsed.ch}:${parsed.v}`]);
+              return (
+                <div key={i} className="border-b border-border-subtle/30 last:border-0 px-3 py-2.5 hover:bg-bg-elevated transition-colors">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-xs font-semibold text-accent">{name}</p>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {hasSubs && (
+                        <button onClick={() => followRef(ref)}
+                          className="text-[9px] px-1.5 py-0.5 border border-border-subtle rounded text-text-muted hover:border-accent/60 hover:text-accent transition-colors">
+                          Explore ›
+                        </button>
+                      )}
+                      <button onClick={() => onNavigate(parsed.book, parsed.ch, parsed.v)}
+                        className="text-[9px] px-1.5 py-0.5 border border-border-subtle rounded text-text-muted hover:border-accent hover:text-accent transition-colors">
+                        Go →
+                      </button>
+                    </div>
+                  </div>
+                  {text && <p className="text-[11px] text-text-muted leading-relaxed line-clamp-2">{text}</p>}
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Save trail footer */}
+      {trail.length > 1 && onSaveTrail && (
+        <div className="px-3 py-2.5 border-t border-border-subtle shrink-0">
+          <button onClick={handleSave} disabled={saving}
+            className={cn("w-full h-8 text-xs border rounded-lg transition-all flex items-center justify-center gap-1.5",
+              saved ? "border-green-500/50 text-green-600 bg-green-500/10"
+                    : "border-border-subtle text-text-muted hover:border-accent hover:text-accent")}>
+            {saving ? <><Save className="h-3 w-3 animate-pulse" /> Saving…</>
+             : saved ? <><Check className="h-3 w-3" /> Trail saved to study</>
+             : <><Save className="h-3 w-3" /> Save Trail to Study</>}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
