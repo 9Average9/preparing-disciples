@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { type LucideIcon, ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, Columns2, ArrowLeftRight, ArrowUpRight, Landmark, Eye, Tag } from "lucide-react";
+import { type LucideIcon, ChevronLeft, ChevronRight, X, ChevronDown, Copy, FileText, Link2, Save, Check, BookOpen, Wand2, AlignLeft, Columns2, ArrowLeftRight, ArrowUpRight, Landmark, Eye, Tag, Search, SlidersHorizontal, Clock, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   OT_BOOK_ORDER, NT_BOOK_ORDER, BOOK_ORDER, BOOK_NAMES,
@@ -9,7 +9,7 @@ import {
   decodeHebrewMorph, normalizeHebrewPosKey, type HebrewMorphRow,
 } from "./utils";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, addDoc, collection, getDocs, orderBy, query } from "firebase/firestore";
 import { useAuthContext } from "@/components/AuthProvider";
 
 /* ── Window type augmentation ───────────────────────────────── */
@@ -1071,8 +1071,6 @@ export default function RhemaPage() {
   const [applications, setApplications] = useState("");
   const [questions, setQuestions] = useState("");
   const [studyTab, setStudyTab] = useState<"observations" | "interpretations" | "applications" | "questions">("observations");
-  const [noteSaving, setNoteSaving] = useState(false);
-  const [noteSaved, setNoteSaved] = useState(false);
 
   // Highlighter: intended categories persist; active = intended ∩ present in verse
   const [intendedHighlights, setIntendedHighlights] = useState<Set<string>>(new Set());
@@ -1294,17 +1292,6 @@ export default function RhemaPage() {
     });
   }
 
-  async function saveNotes() {
-    if (!user) return;
-    setNoteSaving(true);
-    try {
-      const ref = doc(db, "rhema_notes", user.uid, "passages", `${book}_${chapter}_${verse}`);
-      await setDoc(ref, { observations, interpretations, applications, questions, updatedAt: new Date() });
-      setNoteSaved(true);
-      setTimeout(() => setNoteSaved(false), 2000);
-    } catch { /* ignore */ }
-    setNoteSaving(false);
-  }
 
   async function saveXrefTrail(trail: Array<{ book: string; ch: string; v: string }>) {
     if (!user) return;
@@ -1407,7 +1394,7 @@ export default function RhemaPage() {
   return (
     <div className="flex h-full flex-col bg-bg-base">
       {/* ── Top bar ── */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border-subtle bg-bg-surface shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 px-4 py-3.5 border-b border-border-subtle bg-bg-surface shrink-0 flex-wrap">
         <div className="flex items-center gap-2 mr-2">
           <div className="h-7 w-7 bg-accent/10 border border-accent/30 flex items-center justify-center shrink-0 rounded-lg">
             <span className="font-serif text-base text-accent leading-none">Ρ</span>
@@ -1417,55 +1404,55 @@ export default function RhemaPage() {
 
         <button
           onClick={() => { setBookPickerOpen(true); setChPickerOpen(false); setVPickerOpen(false); }}
-          className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary font-medium transition-colors rounded-lg"
+          className="flex items-center gap-1.5 px-3.5 h-9 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary font-medium transition-colors rounded-xl"
         >
           {bookName}
-          <ChevronDown className="h-3 w-3 text-text-muted" />
+          <ChevronDown className="h-3.5 w-3.5 text-text-muted" />
         </button>
 
         <button
           onClick={() => { setChPickerOpen(true); setBookPickerOpen(false); setVPickerOpen(false); }}
-          className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors rounded-lg"
+          className="flex items-center gap-1.5 px-3.5 h-9 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors rounded-xl"
         >
           Ch {chapter}
-          <ChevronDown className="h-3 w-3 text-text-muted" />
+          <ChevronDown className="h-3.5 w-3.5 text-text-muted" />
         </button>
 
         {!fullChapter && (
           <button
             onClick={() => { setVPickerOpen(true); setBookPickerOpen(false); setChPickerOpen(false); }}
-            className="flex items-center gap-1 px-3 h-8 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors rounded-lg"
+            className="flex items-center gap-1.5 px-3.5 h-9 bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-sm text-text-primary transition-colors rounded-xl"
           >
             v {verse}
-            <ChevronDown className="h-3 w-3 text-text-muted" />
+            <ChevronDown className="h-3.5 w-3.5 text-text-muted" />
           </button>
         )}
 
         {!fullChapter && (
           <div className="flex items-center gap-1">
-            <button onClick={() => navigateVerse(-1)} className="h-8 w-8 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors rounded-lg">
+            <button onClick={() => navigateVerse(-1)} className="h-9 w-9 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors rounded-xl">
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <button onClick={() => navigateVerse(1)} className="h-8 w-8 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors rounded-lg">
+            <button onClick={() => navigateVerse(1)} className="h-9 w-9 flex items-center justify-center bg-bg-elevated border border-border-subtle hover:border-[#3a4052] text-text-muted hover:text-text-primary transition-colors rounded-xl">
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
         )}
 
-        <div className="ml-auto flex items-center gap-1.5 flex-wrap">
-          {/* Hebrew / LXX toggle — always visible for OT books */}
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {/* Hebrew / LXX toggle */}
           {isOTBook(book) && (
             <button
               onClick={() => { setHebrewMode(v => !v); setActiveWord(null); }}
               title={hebrewMode ? "Switch to LXX (Greek OT)" : "Switch to Hebrew OT"}
               className={cn(
-                "h-7 px-2.5 flex items-center gap-1.5 border transition-colors rounded-lg text-[11px] font-semibold",
+                "h-9 px-3.5 flex items-center gap-2 border transition-colors rounded-xl text-sm font-semibold",
                 hebrewMode
                   ? "border-blue-500/60 bg-blue-500/15 text-blue-400"
                   : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
               )}
             >
-              <span className="font-serif" style={{ fontFamily: "'Noto Serif Hebrew', serif" }}>א</span>
+              <span className="font-serif text-base" style={{ fontFamily: "'Noto Serif Hebrew', serif" }}>א</span>
               <span>{hebrewMode ? "Hebrew" : "LXX"}</span>
               {isOTBook(book) && hebrewMode && !hebrewAvailable() && (
                 <span className="h-2 w-2 rounded-full border border-blue-400 border-t-transparent animate-spin ml-0.5" />
@@ -1475,11 +1462,31 @@ export default function RhemaPage() {
 
           {/* Copy verse */}
           <button onClick={copyVerse} title="Copy verse"
-            className={cn("h-7 w-7 flex items-center justify-center border transition-colors rounded-lg",
+            className={cn("h-9 w-9 flex items-center justify-center border transition-colors rounded-xl",
               copied ? "border-accent text-accent bg-accent/10" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
             )}>
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
           </button>
+
+          <div className="w-px h-5 bg-border-subtle" />
+
+          {/* Notes */}
+          <ToolBtn
+            active={showNotes}
+            onClick={() => { setShowNotes(v => !v); setShowCrossRefs(false); setShowLibrary(false); setActiveWord(null); setShowWandPopup(false); }}
+            label="Notes"
+          >
+            <FileText className="h-4 w-4" />
+          </ToolBtn>
+
+          {/* Word search */}
+          <ToolBtn
+            active={showLibrary}
+            onClick={() => { setShowLibrary(v => !v); setShowCrossRefs(false); setShowNotes(false); setActiveWord(null); setShowWandPopup(false); }}
+            label="Search"
+          >
+            <Search className="h-4 w-4" />
+          </ToolBtn>
 
           {/* Cross references */}
           <ToolBtn
@@ -1488,101 +1495,31 @@ export default function RhemaPage() {
             label="Refs"
             dot={hasCrossRefs && !showCrossRefs}
           >
-            <Link2 className="h-3.5 w-3.5" />
+            <Link2 className="h-4 w-4" />
           </ToolBtn>
 
-          {/* Word library */}
+          {/* Phrase builder */}
           <ToolBtn
-            active={showLibrary}
-            onClick={() => { setShowLibrary(v => !v); setShowCrossRefs(false); setShowNotes(false); setActiveWord(null); setShowWandPopup(false); }}
-            label="Library"
-          >
-            <BookOpen className="h-3.5 w-3.5" />
-          </ToolBtn>
-
-          {/* Study notes */}
-          <ToolBtn
-            active={showNotes}
-            onClick={() => { setShowNotes(v => !v); setShowCrossRefs(false); setShowLibrary(false); setActiveWord(null); setShowWandPopup(false); }}
-            label="Notes"
-          >
-            <FileText className="h-3.5 w-3.5" />
-          </ToolBtn>
-
-          <div className="w-px h-4 bg-border-subtle mx-0.5" />
-
-          {/* English-only reader */}
-          <button
-            onClick={() => { setEnglishMode(v => !v); setPhraseBuilderMode(false); setSyntaxMode(false); }}
-            title="English-only reader (BSB / MSB)"
-            className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors rounded-lg",
-              englishMode
-                ? "border-accent text-accent bg-accent/10"
-                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
-            )}
-          >
-            <AlignLeft className="h-3 w-3" />
-            <span className="text-[10px] hidden sm:inline">English</span>
-          </button>
-
-          {/* Phrase / sentence structure builder */}
-          <button
+            active={phraseBuilderMode}
             onClick={() => { setPhraseBuilderMode(v => !v); setEnglishMode(false); setSyntaxMode(false); setFullChapter(false); }}
-            title="Phrase structure builder"
-            className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors rounded-lg",
-              phraseBuilderMode
-                ? "border-accent text-accent bg-accent/10"
-                : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
-            )}
+            label="Phrase"
           >
-            <Columns2 className="h-3 w-3" />
-            <span className="text-[10px] hidden sm:inline">Phrase</span>
-          </button>
+            <Columns2 className="h-4 w-4" />
+          </ToolBtn>
 
-          {/* Font size picker */}
-          <div className="relative z-[39]">
-            <button
-              onClick={() => setShowFontPicker(v => !v)}
-              title="Font size"
-              className={cn("h-7 px-2 flex items-center gap-1 border transition-colors rounded-lg",
-                showFontPicker
-                  ? "border-accent text-accent bg-accent/10"
-                  : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
-              )}
-            >
-              <span className="text-[11px] font-bold tracking-tight">Aa</span>
-            </button>
-            {showFontPicker && (
-              <div className="absolute right-0 top-full mt-1 bg-bg-surface border border-border-subtle rounded-xl shadow-2xl z-50 p-2 flex flex-col gap-1 min-w-[110px]">
-                {([1,2,3,4,5] as FontSize[]).map(sz => (
-                  <button
-                    key={sz}
-                    onClick={() => { setFontSize(sz); localStorage.setItem("rhema-font-size", String(sz)); setShowFontPicker(false); }}
-                    className={cn("flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-left transition-colors",
-                      fontSize === sz ? "bg-accent/20 text-accent" : "hover:bg-bg-elevated text-text-muted"
-                    )}
-                  >
-                    <span className={cn("font-serif", sz === 1 ? "text-xs" : sz === 2 ? "text-sm" : sz === 3 ? "text-base" : sz === 4 ? "text-lg" : "text-xl")}>Aa</span>
-                    <span className="text-[10px] font-medium">{sz === 1 ? "XS" : sz === 2 ? "S" : sz === 3 ? "M" : sz === 4 ? "L" : "XL"}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Modes wand */}
+          {/* Display — contains font size, English, and all other view modes */}
           <div className="relative z-[39]">
             <button
               onClick={() => setShowWandPopup(v => !v)}
-              title="View modes & highlighting"
-              className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors relative rounded-lg",
+              title="Display & view options"
+              className={cn("h-9 px-3.5 flex items-center gap-2 border transition-colors relative rounded-xl",
                 showWandPopup || hasActiveMode
                   ? "border-accent text-accent bg-accent/10"
                   : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary"
               )}
             >
-              <Wand2 className="h-3.5 w-3.5" />
-              <span className="text-[10px] hidden sm:inline">Modes</span>
+              <SlidersHorizontal className="h-4 w-4" />
+              <span className="text-sm hidden sm:inline">Display</span>
               {hasActiveMode && !showWandPopup && (
                 <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent" />
               )}
@@ -1595,13 +1532,17 @@ export default function RhemaPage() {
                 intendedCount={intendedHighlights.size}
                 isOTBook={isOTBook(book)} hebrewMode={hebrewMode}
                 hebrewAvailable={hebrewAvailable()}
+                englishMode={englishMode}
+                fontSize={fontSize}
                 onToggleSyntax={() => { setSyntaxMode(v => !v); setShowWandPopup(false); setSelectedSxPhrase(null); }}
                 onToggleChapter={() => setFullChapter(v => !v)}
                 onToggleGreekOnly={() => setGreekOnly(v => !v)}
                 onToggleEnglish={() => setShowEnglish(v => !v)}
+                onToggleEnglishMode={() => { setEnglishMode(v => !v); setPhraseBuilderMode(false); setSyntaxMode(false); }}
                 onToggleTextMode={() => setTextMode(m => m === "critical" ? "majority" : "critical")}
                 onToggleHighlight={() => { setShowHighlighter(v => !v); setShowWandPopup(false); }}
                 onToggleHebrew={() => { setHebrewMode(v => !v); setActiveWord(null); setShowWandPopup(false); }}
+                onSetFontSize={(sz) => { setFontSize(sz); localStorage.setItem("rhema-font-size", String(sz)); }}
               />
             )}
           </div>
@@ -1757,8 +1698,6 @@ export default function RhemaPage() {
             interpretations={interpretations} setInterpretations={setInterpretations}
             applications={applications} setApplications={setApplications}
             questions={questions} setQuestions={setQuestions}
-            noteSaving={noteSaving} noteSaved={noteSaved}
-            onSave={saveNotes}
             onClose={() => setShowNotes(false)}
             onHighlightWord={highlightWordFromNotes}
           />
@@ -3376,15 +3315,15 @@ function CrossRefsPanel({
 /* ── WandPopup ──────────────────────────────────────────────── */
 function WandPopup({
   syntaxMode, fullChapter, greekOnly, showEnglish, textMode, showHighlighter, intendedCount,
-  isOTBook: isOT, hebrewMode, hebrewAvailable: hebAvail,
-  onToggleSyntax, onToggleChapter, onToggleGreekOnly, onToggleEnglish, onToggleTextMode, onToggleHighlight, onToggleHebrew,
+  isOTBook: isOT, hebrewMode, hebrewAvailable: hebAvail, englishMode, fontSize,
+  onToggleSyntax, onToggleChapter, onToggleGreekOnly, onToggleEnglish, onToggleEnglishMode, onToggleTextMode, onToggleHighlight, onToggleHebrew, onSetFontSize,
 }: {
   syntaxMode: boolean; fullChapter: boolean; greekOnly: boolean; showEnglish: boolean; textMode: TextMode;
-  showHighlighter: boolean; intendedCount: number;
+  showHighlighter: boolean; intendedCount: number; englishMode: boolean; fontSize: FontSize;
   isOTBook: boolean; hebrewMode: boolean; hebrewAvailable: boolean;
   onToggleSyntax: () => void; onToggleChapter: () => void; onToggleGreekOnly: () => void;
-  onToggleEnglish: () => void; onToggleTextMode: () => void; onToggleHighlight: () => void;
-  onToggleHebrew: () => void;
+  onToggleEnglish: () => void; onToggleEnglishMode: () => void; onToggleTextMode: () => void;
+  onToggleHighlight: () => void; onToggleHebrew: () => void; onSetFontSize: (sz: FontSize) => void;
 }) {
   const isHebrew = hebrewMode && isOT && hebAvail;
   return (
@@ -3444,6 +3383,29 @@ function WandPopup({
         desc={intendedCount > 0 ? `${intendedCount} type${intendedCount > 1 ? "s" : ""} active` : "Highlight words by part of speech"}
         onClick={onToggleHighlight}
       />
+      <WandItem
+        active={englishMode}
+        label="English Reader"
+        desc="Show English-only reading view"
+        onClick={onToggleEnglishMode}
+      />
+      <div className="my-1 border-t border-border-subtle/60" />
+      <div className="px-3 py-2">
+        <p className="text-[10px] text-text-muted font-medium uppercase tracking-widest mb-2">Font Size</p>
+        <div className="flex items-center gap-1.5">
+          {([1,2,3,4,5] as FontSize[]).map(sz => (
+            <button
+              key={sz}
+              onClick={() => onSetFontSize(sz)}
+              className={cn("flex-1 py-1.5 rounded-lg text-center transition-colors",
+                fontSize === sz ? "bg-accent/20 text-accent font-semibold" : "hover:bg-bg-elevated text-text-muted"
+              )}
+            >
+              <span className={cn("font-serif block", sz === 1 ? "text-xs" : sz === 2 ? "text-sm" : sz === 3 ? "text-base" : sz === 4 ? "text-lg" : "text-xl")}>A</span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -3776,6 +3738,17 @@ const WS_META: Record<WorkspaceTab, { label: string; placeholder: string }> = {
   questions:       { label: "Questions", placeholder: "What are you wondering? What needs more study?" },
 };
 
+interface NoteHistoryEntry {
+  id: string;
+  name: string;
+  observations: string;
+  interpretations: string;
+  applications: string;
+  questions: string;
+  aiObservations: string;
+  savedAt: Date;
+}
+
 function StudyWorkspacePanel({
   book, chapter, verse, textMode, isHebrew,
   activeTab, onTabChange,
@@ -3783,7 +3756,7 @@ function StudyWorkspacePanel({
   interpretations, setInterpretations,
   applications, setApplications,
   questions, setQuestions,
-  noteSaving, noteSaved, onSave, onClose, onHighlightWord,
+  onClose, onHighlightWord,
 }: {
   book: string; chapter: string; verse: string; textMode: TextMode; isHebrew: boolean;
   activeTab: WorkspaceTab; onTabChange: (t: WorkspaceTab) => void;
@@ -3791,42 +3764,93 @@ function StudyWorkspacePanel({
   interpretations: string; setInterpretations: (v: string) => void;
   applications: string; setApplications: (v: string) => void;
   questions: string; setQuestions: (v: string) => void;
-  noteSaving: boolean; noteSaved: boolean;
-  onSave: () => void; onClose: () => void;
+  onClose: () => void;
   onHighlightWord: (strongs: number) => void;
 }) {
   const { user } = useAuthContext();
-  const [verseThemes, setVerseThemes] = useState<Set<string>>(new Set());
   const [aiGenerating, setAiGenerating] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [aiObservations, setAiObservations] = useState("");
+  const [noteName, setNoteName] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
+  const [noteHistory, setNoteHistory] = useState<NoteHistoryEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const passageKey = `${book}_${chapter}_${verse}`;
 
   /* Clear AI observations when verse changes */
   useEffect(() => { setAiObservations(""); }, [book, chapter, verse]);
 
-  /* Load themes when verse changes */
+  /* Load note history when verse changes */
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
       try {
-        const ref = doc(db, "rhema_themes", user.uid, "passages", `${book}_${chapter}_${verse}`);
-        const snap = await getDoc(ref);
-        if (!cancelled) setVerseThemes(snap.exists() ? new Set(snap.data().themes || []) : new Set());
+        const col = collection(db, "rhema_notes", user.uid, "passages", passageKey, "history");
+        const q = query(col, orderBy("savedAt", "desc"));
+        const snap = await getDocs(q);
+        if (!cancelled) {
+          setNoteHistory(snap.docs.map(d => ({
+            id: d.id,
+            name: d.data().name || "",
+            observations: d.data().observations || "",
+            interpretations: d.data().interpretations || "",
+            applications: d.data().applications || "",
+            questions: d.data().questions || "",
+            aiObservations: d.data().aiObservations || "",
+            savedAt: d.data().savedAt?.toDate?.() || new Date(),
+          })));
+        }
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
-  }, [user, book, chapter, verse]);
+  }, [user, passageKey]);
 
-  async function toggleTheme(theme: string) {
+  async function saveNote() {
     if (!user) return;
-    const next = new Set(verseThemes);
-    if (next.has(theme)) next.delete(theme); else next.add(theme);
-    setVerseThemes(next);
+    setNoteSaving(true);
     try {
-      const ref = doc(db, "rhema_themes", user.uid, "passages", `${book}_${chapter}_${verse}`);
-      await setDoc(ref, { themes: [...next], updatedAt: new Date() });
+      const col = collection(db, "rhema_notes", user.uid, "passages", passageKey, "history");
+      await addDoc(col, {
+        name: noteName.trim(),
+        observations, interpretations, applications, questions,
+        aiObservations,
+        savedAt: new Date(),
+      });
+      setNoteSaved(true);
+      setNoteName("");
+      setTimeout(() => setNoteSaved(false), 2000);
+      // Refresh history
+      const q = query(col, orderBy("savedAt", "desc"));
+      const snap = await getDocs(q);
+      setNoteHistory(snap.docs.map(d => ({
+        id: d.id,
+        name: d.data().name || "",
+        observations: d.data().observations || "",
+        interpretations: d.data().interpretations || "",
+        applications: d.data().applications || "",
+        questions: d.data().questions || "",
+        aiObservations: d.data().aiObservations || "",
+        savedAt: d.data().savedAt?.toDate?.() || new Date(),
+      })));
     } catch { /* ignore */ }
+    setNoteSaving(false);
+  }
+
+  function loadHistoryEntry(entry: NoteHistoryEntry) {
+    setObservations(entry.observations);
+    setInterpretations(entry.interpretations);
+    setApplications(entry.applications);
+    setQuestions(entry.questions);
+    setAiObservations(entry.aiObservations);
+    setHistoryOpen(false);
+  }
+
+  function clearNote() {
+    setObservations(""); setInterpretations(""); setApplications(""); setQuestions("");
+    setAiObservations(""); setNoteName("");
+    setHistoryOpen(false);
   }
 
   async function generateObservations() {
@@ -3858,7 +3882,6 @@ function StudyWorkspacePanel({
   const genre = BOOK_GENRE[book] || "narrative";
   const genreColor = GENRE_COLOR[genre] || "";
   const context = BOOK_CONTEXT[book];
-  const genrePrompts = GENRE_PROMPTS[genre] || [];
 
   const value = activeTab === "observations" ? observations
     : activeTab === "interpretations" ? interpretations
@@ -3945,46 +3968,63 @@ function StudyWorkspacePanel({
           </div>
         )}
 
-        {/* Genre starter prompts — shown when Observe is empty */}
-        {activeTab === "observations" && !observations && !aiObservations && genrePrompts.length > 0 && (
-          <div className="shrink-0">
-            <p className="text-[9px] text-text-muted uppercase tracking-widest mb-1.5">Starter questions</p>
-            <div className="flex flex-wrap gap-1">
-              {genrePrompts.map((p, i) => (
-                <button key={i} onClick={() => setObservations(p + " ")}
-                  className="text-[10px] px-2 py-0.5 bg-bg-elevated border border-border-subtle rounded-full text-text-muted hover:border-accent hover:text-accent transition-colors">
-                  {p}
-                </button>
-              ))}
-            </div>
+      </div>
+
+      {/* Notes History */}
+      <div className="border-t border-border-subtle/50 shrink-0">
+        <button
+          onClick={() => setHistoryOpen(v => !v)}
+          className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-bg-elevated/40 transition-colors"
+        >
+          <Clock className="h-3.5 w-3.5 text-text-muted shrink-0" />
+          <span className="text-xs text-text-muted flex-1 text-left">
+            {noteHistory.length > 0 ? `${noteHistory.length} saved note${noteHistory.length > 1 ? "s" : ""}` : "No saved notes"}
+          </span>
+          <ChevronDown className={cn("h-3.5 w-3.5 text-text-muted transition-transform shrink-0", historyOpen && "rotate-180")} />
+        </button>
+        {historyOpen && (
+          <div className="border-t border-border-subtle/30 max-h-36 overflow-y-auto">
+            <button
+              onClick={clearNote}
+              className="w-full px-4 py-2 flex items-center gap-2 hover:bg-bg-elevated/40 transition-colors border-b border-border-subtle/20"
+            >
+              <Plus className="h-3.5 w-3.5 text-accent shrink-0" />
+              <span className="text-xs text-accent font-medium">New blank note</span>
+            </button>
+            {noteHistory.map(entry => (
+              <button
+                key={entry.id}
+                onClick={() => loadHistoryEntry(entry)}
+                className="w-full px-4 py-2.5 flex items-start gap-2 hover:bg-bg-elevated/40 transition-colors border-b border-border-subtle/10 last:border-0 text-left"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-text-primary font-medium truncate">{entry.name || "Untitled note"}</p>
+                  <p className="text-[10px] text-text-muted mt-0.5">
+                    {entry.savedAt.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                    {" · "}
+                    {entry.savedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                  </p>
+                </div>
+              </button>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Theme tagger */}
-      <div className="px-4 py-3 border-t border-border-subtle/50 shrink-0">
-        <p className="text-[9px] text-text-muted font-semibold uppercase tracking-widest mb-2">Tag Themes</p>
-        <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
-          {STUDY_THEMES.map(theme => (
-            <button key={theme} onClick={() => toggleTheme(theme)}
-              className={cn("text-[10px] px-2 py-0.5 rounded-full border transition-colors",
-                verseThemes.has(theme)
-                  ? "bg-accent/15 border-accent/50 text-accent font-semibold"
-                  : "border-border-subtle text-text-muted hover:border-accent/40 hover:text-text-primary")}>
-              {theme}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Save */}
-      <div className="px-4 pb-4 shrink-0">
-        <button onClick={onSave} disabled={noteSaving}
-          className={cn("w-full h-9 flex items-center justify-center gap-2 text-xs font-medium border transition-colors disabled:opacity-60 rounded-lg",
-            noteSaved ? "border-accent text-accent bg-accent/5" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
-          {noteSaved ? <><Check className="h-3.5 w-3.5" /> Saved</>
-            : noteSaving ? <><div className="h-3.5 w-3.5 border border-current border-t-transparent rounded-full animate-spin" /> Saving…</>
-            : <><Save className="h-3.5 w-3.5" /> Save</>}
+      {/* Name + Save */}
+      <div className="px-4 pb-4 pt-3 flex flex-col gap-2 shrink-0">
+        <input
+          value={noteName}
+          onChange={e => setNoteName(e.target.value)}
+          placeholder="Name this note (optional)…"
+          className="w-full h-9 bg-bg-elevated border border-border-subtle rounded-xl px-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+        />
+        <button onClick={saveNote} disabled={noteSaving}
+          className={cn("w-full h-10 flex items-center justify-center gap-2 text-sm font-medium border transition-colors disabled:opacity-60 rounded-xl",
+            noteSaved ? "border-accent text-accent bg-accent/10" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
+          {noteSaved ? <><Check className="h-4 w-4" /> Saved</>
+            : noteSaving ? <><div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> Saving…</>
+            : <><Save className="h-4 w-4" /> Save Note</>}
         </button>
       </div>
     </div>
@@ -4025,10 +4065,10 @@ function ToolBtn({ active, onClick, label, dot, children }: {
 }) {
   return (
     <button onClick={onClick} title={label}
-      className={cn("h-7 px-2 flex items-center gap-1.5 border transition-colors relative rounded-lg",
+      className={cn("h-9 px-3.5 flex items-center gap-2 border transition-colors relative rounded-xl",
         active ? "border-accent text-accent bg-accent/10" : "border-border-subtle text-text-muted hover:border-[#3a4052] hover:text-text-primary")}>
       {children}
-      <span className="text-[10px] hidden sm:inline">{label}</span>
+      <span className="text-sm hidden sm:inline">{label}</span>
       {dot && <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-accent" />}
     </button>
   );
